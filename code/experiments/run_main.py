@@ -46,8 +46,12 @@ def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, 
     t0 = time.time()
 
     if alg_name == 'Static-VRPTW':
-        sol, s_tm = run_static_vrptw(tm, demands, service_times, windows_open, windows_close, seed=seed)
-        m = compute_metrics(sol, s_tm, demands, service_times, windows_open, windows_close, LAMBDA_1, LAMBDA_2, use_reliability_margin=False)
+        sol, static_tm = run_static_vrptw(tm, demands, service_times, windows_open, windows_close, seed=seed)
+        m = compute_metrics(sol, tm, demands, service_times, windows_open, windows_close, LAMBDA_1, LAMBDA_2)
+        pm = compute_metrics(sol, static_tm, demands, service_times, windows_open, windows_close, LAMBDA_1, LAMBDA_2)
+        m['planning_total'] = pm['total']
+        m['planning_travel'] = pm['travel']
+        m['planning_lateness'] = pm['lateness']
     elif alg_name == 'TA-VRPTW-Greedy':
         sol = run_ta_greedy(tm, demands, service_times, windows_open, windows_close, seed=seed)
         m = compute_metrics(sol, tm, demands, service_times, windows_open, windows_close, LAMBDA_1, LAMBDA_2)
@@ -79,6 +83,8 @@ def main():
     parser.add_argument('--iters', type=int, default=800, help='Max ALNS iterations (default: 800)')
     parser.add_argument('--algo', type=str, default=None,
                         help='Comma-separated algorithm names. Default: all 5')
+    parser.add_argument('--instance', type=str, default='easy', choices=['easy', 'medium'],
+                        help='Instance difficulty (default: easy)')
     args = parser.parse_args()
 
     n_seeds = args.seeds
@@ -95,7 +101,8 @@ def main():
     print()
 
     tm = TrafficManager(theta=1.0, beta=0.5)
-    demands, service_times, windows_open, windows_close = load_customer_data()
+    demands, service_times, windows_open, windows_close = load_customer_data(
+        csv_path=PROJECT_ROOT / 'datasets' / 'customers' / f'customers_47{"" if args.instance == "easy" else "_medium"}.csv')
 
     run_id = datetime.now().strftime('run_%Y%m%d_%H%M%S')
     run_dir = RAW_DIR / run_id

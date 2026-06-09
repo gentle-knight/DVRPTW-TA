@@ -208,6 +208,8 @@ def main():
     parser = argparse.ArgumentParser(description='T-ALNS-RRD Ablation Study Runner')
     parser.add_argument('--seeds', type=int, default=10, help='Number of random seeds (default: 10)')
     parser.add_argument('--iters', type=int, default=600, help='Max ALNS iterations (default: 600)')
+    parser.add_argument('--instance', type=str, default='easy', choices=['easy', 'medium'],
+                        help='Instance difficulty (default: easy)')
     args = parser.parse_args()
 
     n_seeds = args.seeds
@@ -219,7 +221,8 @@ def main():
     print(f'  Max iterations: {max_iter}')
 
     tm = TrafficManager(theta=1.0, beta=0.5)
-    demands, service_times, windows_open, windows_close = load_customer_data()
+    demands, service_times, windows_open, windows_close = load_customer_data(
+        csv_path=PROJECT_ROOT / 'datasets' / 'customers' / f'customers_47{"" if args.instance == "easy" else "_medium"}.csv')
 
     variants = {
         'no_tabu':    (False, False, False),

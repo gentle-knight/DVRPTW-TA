@@ -1,9 +1,9 @@
 """
 Static Vehicle Routing Problem with Time Windows (Static-VRPTW) baseline.
 
-Classical VRPTW without time-dependent travel times or congestion penalties.
-Uses free-flow travel times (traffic.free_flow_time) averaged across all
-intervals. Greedy insertion heuristic — no metaheuristic optimization.
+Planning: uses period-average travel time across all 12 intervals.
+Evaluation: uses same dynamic TrafficManager as other algorithms.
+No congestion cost during planning, no time-dependent optimization.
 
 Corresponds to Baseline 1 in the paper (Sect 4.5).
 """
@@ -15,8 +15,9 @@ from core.initialization import build_greedy_init
 
 class StaticTrafficManager:
     def __init__(self, base_traffic):
-        valid = (base_traffic.free_flow < 9999) & (base_traffic.free_flow > 0)
-        self.tt = np.where(valid, base_traffic.free_flow, base_traffic._fallback_tt)
+        avg_tt = np.mean(base_traffic.tensor[:, :, :, 0], axis=2)
+        avg_tt[avg_tt >= 9999] = base_traffic._fallback_tt
+        self.tt = avg_tt
 
     def travel_time(self, i, j, _departure):
         ok = (0 <= i < self.tt.shape[0] and 0 <= j < self.tt.shape[1])
