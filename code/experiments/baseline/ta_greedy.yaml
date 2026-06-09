@@ -1,0 +1,16 @@
+experiment: "ta_greedy"
+algorithm: "TA-VRPTW-Greedy"
+description: "Traffic-aware VRPTW with greedy insertion, no metaheuristic search"
+
+inherits: "configs/default.yaml"
+
+algorithm_config:
+  traffic_aware: true
+  congestion_penalty: true
+  use_alns: false
+  use_tabu: false
+  use_rollout: false
+
+baseline:
+  type: "traffic_aware_greedy"
+  travel_time: "time_dependent"

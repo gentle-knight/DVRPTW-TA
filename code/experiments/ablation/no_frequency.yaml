@@ -1,0 +1,11 @@
+experiment: "ablation_no_frequency"
+algorithm: "T-ALNS-RRD"
+description: "Ablation: disable frequency-based diversification memory"
+
+inherits: "experiments/main/t_alns_rrd.yaml"
+
+algorithm_config:
+  tabu:
+    move_enabled: true
+    solution_enabled: true
+    frequency_enabled: false

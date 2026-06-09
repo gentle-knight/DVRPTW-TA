@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Generated cache
+cache/
+
+# Binary/generated data (not source)
+*.pkl
+*.npz
+*.placeholder
+
+# Generated outputs
+code/outputs/
+code/experiments/*/results/
+code/paper_reproduction/

@@ -1,0 +1,21 @@
+experiment: "t_alns_rrd"
+algorithm: "T-ALNS-RRD"
+description: "Full T-ALNS with Rollout-based Real-Time Dispatch (Sect 3.3.3, Algorithm 3)"
+
+inherits: "configs/default.yaml"
+
+algorithm_config:
+  traffic_aware: true
+  congestion_penalty: true
+  use_alns: true
+  use_tabu: true
+  use_rollout: true
+  tabu:
+    move_enabled: true
+    solution_enabled: true
+    frequency_enabled: true
+  rollout:
+    event_detection: true
+    candidate_generation: true
+    monte_carlo_simulation: true
+    tabu_guided_selection: true

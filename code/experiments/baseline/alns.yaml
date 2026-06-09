@@ -1,0 +1,15 @@
+experiment: "alns_base"
+algorithm: "ALNS-Base"
+description: "ALNS without Tabu memory or rollout dispatch (Sect 3.3.1)"
+
+inherits: "configs/default.yaml"
+
+algorithm_config:
+  traffic_aware: true
+  congestion_penalty: true
+  use_alns: true
+  use_tabu: false
+  use_rollout: false
+
+baseline:
+  type: "alns_no_memory"

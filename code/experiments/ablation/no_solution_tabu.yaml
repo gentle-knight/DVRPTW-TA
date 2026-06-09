@@ -1,0 +1,11 @@
+experiment: "ablation_no_solution_tabu"
+algorithm: "T-ALNS-RRD"
+description: "Ablation: disable solution-based Tabu memory"
+
+inherits: "experiments/main/t_alns_rrd.yaml"
+
+algorithm_config:
+  tabu:
+    move_enabled: true
+    solution_enabled: false
+    frequency_enabled: true

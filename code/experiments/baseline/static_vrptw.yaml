@@ -1,0 +1,16 @@
+experiment: "static_vrptw"
+algorithm: "Static-VRPTW"
+description: "Static VRPTW baseline - greedy insertion without time-dependent travel times or congestion penalties"
+
+inherits: "configs/default.yaml"
+
+algorithm_config:
+  traffic_aware: false
+  congestion_penalty: false
+  use_alns: false
+  use_tabu: false
+  use_rollout: false
+
+baseline:
+  type: "static_greedy"
+  travel_time: "symmetric_fixed"

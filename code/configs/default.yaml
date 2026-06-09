@@ -1,0 +1,100 @@
+# Global configuration for T-ALNS-RRD
+problem:
+  name: "DVRPTW-TA"
+  instance: "shanghai_jingan_huangpu"
+  n_customers: 47
+  n_vehicles: 4
+  depot_index: 0
+
+network:
+  study_area: [8, 10]  # km²
+  n_nodes: 48           # 47 customers + 1 depot
+  n_arcs: 2256
+
+traffic:
+  n_intervals: 12
+  interval_start: "06:00"
+  interval_end: "18:00"
+  interval_duration_h: 1
+  congestion_scaling: 1.0       # θ in Eq. (9)
+  reliability_beta: 0.5         # β in Eq. (10)
+  reliability_margin_enabled: true
+
+customer:
+  demand_range: [3, 12]         # kg
+  service_duration: 4           # minutes
+  time_window_segments:
+    morning:   ["09:00", "12:00"]
+    afternoon: ["13:00", "16:00"]
+    evening:   ["17:00", "20:00"]
+
+vehicle:
+  capacity_kg: 120
+  max_operational_hours: 10
+  homogeneous: true
+
+objective:
+  lambda_1: 1.0   # lateness penalty weight
+  lambda_2: 0.5   # congestion penalty weight
+
+alns:
+  max_iterations: 1000
+  time_limit_s: 300
+  destroy_fraction_range: [0.1, 0.4]
+  initial_temperature_factor: 0.05
+  cooling_rate: 0.99975
+  reaction_factor: 0.1          # ξ in Eq. (19)
+  segment_size: 100             # π (operator weight update period)
+  reward_levels:
+    global_best: 10.0           # σ₁
+    improvement: 5.0            # σ₂
+    feasible: 2.0               # σ₃
+    non_contributing: 0.5       # σ₄
+
+tabu:
+  move_tenure: 7                # τ_move
+  solution_tenure: 15           # τ_sol
+  move_tenure_min: 3
+  move_tenure_max: 15
+  overlap_threshold: 0.5        # μ in Eq. (22)
+  aspiration:
+    least_frequency_beta: 0.3   # β in Eq. (29)
+    traffic_gamma: 0.7          # γ in Eq. (30)
+  frequency_normalization_factor: 2.0     # κ in Eq. (32)
+  frequency_normalization_interval: 50    # ν
+  diversification_intensity_max: 0.8      # δ_max in Eq. (26)
+  diversification:
+    omega_1: 0.4                # last_best_weight
+    omega_2: 0.3                # tabu_move_weight
+    omega_3: 0.3                # frequency_std_weight
+  probability_eta: 0.6          # η in Eq. (27)
+
+rollout:
+  horizon_default_min: 30       # H_min in Eq. (42)
+  horizon_default_max: 120      # H_max in Eq. (42)
+  horizon_alpha_urgency: 0.5
+  n_simulations_default: 50
+  n_simulations_min: 10
+  dispatch_score:
+    omega_1: 0.4                # rollout value weight
+    omega_2: 0.3                # stability weight
+    omega_3: 0.3                # recovery weight
+  tabu_penalty: 50.0            # τ_penalty in Eq. (38)
+  tabu_bonus: 30.0              # τ_bonus in Eq. (38)
+
+event:
+  urgency:
+    alpha: 0.4
+    beta: 0.3
+    gamma: 0.3
+  threshold: 0.5
+  types:
+    E1: "critical_traffic_incident"
+    E2: "urgent_delivery_insertion"
+    E3: "vehicle_capacity_violation"
+    E4: "service_time_violation"
+
+execution:
+  n_runs: 30
+  random_seeds: [42, 123, 456, 789, 1024]
+  parallel_threads: 4

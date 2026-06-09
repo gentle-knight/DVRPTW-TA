@@ -1,0 +1,16 @@
+experiment: "t_alns"
+algorithm: "T-ALNS"
+description: "Tabu-enhanced ALNS without rollout dispatch (Sect 3.3.2, Algorithm 2)"
+
+inherits: "configs/default.yaml"
+
+algorithm_config:
+  traffic_aware: true
+  congestion_penalty: true
+  use_alns: true
+  use_tabu: true
+  use_rollout: false
+  tabu:
+    move_enabled: true
+    solution_enabled: true
+    frequency_enabled: true

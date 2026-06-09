@@ -1,0 +1,11 @@
+experiment: "ablation_no_move_tabu"
+algorithm: "T-ALNS-RRD"
+description: "Ablation: disable move-based Tabu list"
+
+inherits: "experiments/main/t_alns_rrd.yaml"
+
+algorithm_config:
+  tabu:
+    move_enabled: false
+    solution_enabled: true
+    frequency_enabled: true

@@ -1,0 +1,9 @@
+experiment: "robustness_sigma_05"
+algorithm: "T-ALNS-RRD"
+description: "Robustness test: high traffic variability (σ = 0.5)"
+
+inherits: "experiments/main/t_alns_rrd.yaml"
+
+robustness:
+  traffic_variability_sigma: 0.5
+  n_disruption_scenarios: 10
