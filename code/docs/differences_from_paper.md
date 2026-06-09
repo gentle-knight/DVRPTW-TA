@@ -1,31 +1,41 @@
-# Known Differences from Paper
+# 与论文的已知差异
 
-## Implemented as Simplifications
+## 实现简化
 
-| Item | Paper | Our Implementation | Reason |
-|------|-------|-------------------|--------|
-| **RRD threading** | Thread 1 (optimization) + Thread 2 (event monitoring) | Single-thread synchronous | Phase 3D design choice; events injected at predetermined iterations (250/500/750) |
-| **E3 capacity violation** | 4 event types (E1-E4) | 3 event types (E1/E2/E4) | E3 handled implicitly by capacity constraints in repair |
-| **Eq.37 linear interpolation** | Piecewise-linear interpolation for rollout | Piecewise-constant lookup | 60-min horizon limits impact |
-| **Eq.42-43 adaptive horizon** | $H_{rollout}$ and $N_{sim}$ adapt to urgency | Fixed horizon=60min, single simulation | Synchronous version limitation |
-| **Eq.39 composite weights** | $\omega_1=0.4, \omega_2=0.3, \omega_3=0.3$ | All weights = 1.0 | Equivalent to equal weighting |
-| **Eq.16-17 insertion cost** | Incremental cost delta formula | Full forward propagation | More robust; low computational overhead for n=47 |
+| 项目 | 论文 | 本实现 | 原因 |
+|------|------|--------|------|
+| **RRD 线程模型** | 线程 1（优化）+ 线程 2（事件监控） | 单线程同步 | 设计选择；事件在预设迭代（250/500/750）触发 |
+| **E3 容量违规事件** | 4 种事件类型 (E1-E4) | 3 种事件类型 (E1/E2/E4) | repair 中的容量约束隐式处理了 E3 |
+| **Eq.37 线性插值** | rollout 使用分段线性插值 | 分段常数查找 | 60 分钟时域限制影响 |
+| **Eq.42-43 自适应时域** | $H_{rollout}$ 和 $N_{sim}$ 根据紧迫度自适应 | 固定 horizon=60min，单次模拟 | 同步版限制 |
+| **Eq.39 复合权重** | $\omega_1=0.4, \omega_2=0.3, \omega_3=0.3$ | 所有权重 = 1.0 | 等价于等权配置 |
+| **Eq.16-17 插入成本** | 增量成本公式 | 全量前向传播 | 更稳健；n=47 时计算开销可忽略 |
 
-## Data Generation Differences
+## 数据生成差异
 
-| Item | Paper | Our Implementation | Reason |
-|------|-------|-------------------|--------|
-| **Traffic data source** | Gaode Maps API + SUMO v1.19 simulation | Synthetic OSM-based profiles | Public API access unavailable |
-| **Eq.10 $\eta$ generation** | Empirical standard deviations from fleet data | Multiplicative: $\eta = t \times variability$ | Synthetic approximation (usage layer is correct additive form) |
-| **Eq.8 travel time** | Pure piecewise-constant $t_{ij}^{(h)}$ | Road-type-weighted peak amplification added | Enhances realism for OSM-based synthesis |
-| **Road classification** | 4 classes (paper: network-level) | 5 classes in path composition (adds tertiary) | Path-level granularity; paper 4-class scheme used in network-level stats |
-| **Evening time windows** | 17:00-20:00 | Traffic data only to 18:00 | Paper limitation; last interval values used as fallback |
-| **Study area traffic data** | Paper cites 2256 directed segments, 4 road types, 18/34/41/7% split | OSM road network: verified at network level with comparable distribution | Single-run OSM download; percentages vary based on exact OSM snapshot |
+| 项目 | 论文 | 本实现 | 原因 |
+|------|------|--------|------|
+| **交通数据来源** | 高德地图 API + SUMO v1.19 仿真 | 基于 OSM 的合成交通剖面 | 无公开 API 访问权限 |
+| **Eq.10 $\eta$ 生成方式** | 基于历史轨迹数据的经验标准差 | 乘性生成：$\eta = t \times variability$ | 合成近似（使用层为正确的加性形式） |
+| **Eq.8 旅行时间** | 纯分段常数 $t_{ij}^{(h)}$ | 增加了道路类型加权的峰值放大 | 增强 OSM 合成数据的真实感 |
+| **道路分类** | 4 类（论文：路网层级） | 路径组成中使用 5 类（增加 tertiary） | 路径层级的粒度；论文 4 类方案用于路网层级统计 |
+| **晚间时间窗** | 17:00-20:00 | 交通数据仅覆盖至 18:00 | 论文自身限制；超过 18:00 使用最后区间值 |
+| **研究区域交通数据** | 论文引用 2256 条有向路段、4 种道路类型、18/34/41/7% 比例 | OSM 路网：已在路网层级验证，分布接近 | 单次 OSM 下载；比例因具体 OSM 快照而异 |
 
-## Experimental Differences
+## 实验差异
 
-| Item | Paper | Our Implementation | Reason |
-|------|-------|-------------------|--------|
-| **Oracle-Traffic-Perfect** | Baseline with perfect traffic foresight | Not yet implemented | Requires separate traffic generation with oracle knowledge |
-| **SOTA comparison** | Pisinger & Ropke ALNS comparison (p<0.001) | Not implemented | External benchmark beyond scope of core reproduction |
-| **30 runs** | All experiments ran 30 seeds | Runner supports N_SEEDS=30 | Default ready; user sets seed count |
+| 项目 | 论文 | 本实现 | 原因 |
+|------|------|--------|------|
+| **Oracle-Traffic-Perfect 基准** | 具有完美交通预知能力的基准 | 尚未实现 | 需要单独生成具有先知知识的交通数据 |
+| **SOTA 对比** | 与 Pisinger & Ropke ALNS 对比 (p<0.001) | 未实现 | 外部基准超出核心复现范围 |
+| **30 次运行** | 所有实验运行 30 个种子 | runner 支持 N_SEEDS=30 | 默认就绪；用户设置种子数量 |
+
+## 算法 3 (RRD) 简化说明
+
+同步版实现了算法 3 的全部核心逻辑（事件触发 → 候选动作生成 → rollout 评估 → 调度决策 → Tabu 记忆更新），但做了以下简化：
+
+1. **单线程同步**：论文描述双线程并行，本实现为单线程顺序执行
+2. **预设事件迭代**：事件在固定迭代（250/500/750）触发，而非通过 `monitor_events()` 实时检测
+3. **无 Eq.34 紧迫度评分**：因同步版使用预设触发，不需计算 $\Psi(e,t)$
+
+这些简化不影响对算法机制的验证。
