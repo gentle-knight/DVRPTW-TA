@@ -11,13 +11,18 @@ from .solution import Route, N_DEPOT
 
 
 def _eval_insertion(route, cid, traffic, demands, service_times,
-                    windows_open, windows_close, lambda_1, lambda_2):
+                    windows_open, windows_close, lambda_1, lambda_2,
+                    capacity=None):
     nodes = route.customer_nodes()
     best_cost = float('inf')
     second_best = float('inf')
     best_nodes = None
 
     for pos in range(len(nodes) + 1):
+        if capacity is not None:
+            trial_demand = route.total_demand(demands) + demands[cid]
+            if trial_demand > capacity:
+                continue
         trial_nodes = [N_DEPOT] + nodes[:pos] + [cid] + nodes[pos:] + [N_DEPOT]
         trial = Route(trial_nodes)
         trial.departure_time = route.departure_time
@@ -36,7 +41,7 @@ def _eval_insertion(route, cid, traffic, demands, service_times,
 
 def greedy_insertion(solution, removed_customers, traffic, demands,
                      service_times, windows_open, windows_close,
-                     lambda_1=1.0, lambda_2=0.5, rng=None):
+                     lambda_1=1.0, lambda_2=0.5, capacity=None, rng=None):
     if rng is None:
         rng = np.random.RandomState()
     shuffled = list(removed_customers)
@@ -49,7 +54,8 @@ def greedy_insertion(solution, removed_customers, traffic, demands,
         for v, route in enumerate(solution.routes):
             nodes, cost, _ = _eval_insertion(
                 route, cid, traffic, demands, service_times,
-                windows_open, windows_close, lambda_1, lambda_2)
+                windows_open, windows_close, lambda_1, lambda_2,
+                capacity=capacity)
             if nodes is not None and cost < best_cost_val:
                 best_cost_val = cost
                 best_nodes = nodes
@@ -61,7 +67,7 @@ def greedy_insertion(solution, removed_customers, traffic, demands,
 
 def regret2_insertion(solution, removed_customers, traffic, demands,
                       service_times, windows_open, windows_close,
-                      lambda_1=1.0, lambda_2=0.5, rng=None):
+                      lambda_1=1.0, lambda_2=0.5, capacity=None, rng=None):
     remaining = set(removed_customers)
 
     while remaining:
@@ -78,7 +84,8 @@ def regret2_insertion(solution, removed_customers, traffic, demands,
             for v, route in enumerate(solution.routes):
                 nodes, c1, c2 = _eval_insertion(
                     route, cid, traffic, demands, service_times,
-                    windows_open, windows_close, lambda_1, lambda_2)
+                    windows_open, windows_close, lambda_1, lambda_2,
+                    capacity=capacity)
                 if nodes is not None and c1 < best_cost:
                     second_cost = best_cost
                     best_cost = c1
@@ -100,7 +107,8 @@ def regret2_insertion(solution, removed_customers, traffic, demands,
             for v, route in enumerate(solution.routes):
                 nodes, cost, _ = _eval_insertion(
                     route, best_cid, traffic, demands, service_times,
-                    windows_open, windows_close, lambda_1, lambda_2)
+                    windows_open, windows_close, lambda_1, lambda_2,
+                    capacity=capacity)
                 if nodes is not None:
                     best_info = (v, nodes)
                     break
@@ -111,7 +119,7 @@ def regret2_insertion(solution, removed_customers, traffic, demands,
 
 def tw_aware_insertion(solution, removed_customers, traffic, demands,
                        service_times, windows_open, windows_close,
-                       lambda_1=1.0, lambda_2=0.5, rng=None):
+                       lambda_1=1.0, lambda_2=0.5, capacity=None, rng=None):
     remaining = set(removed_customers)
 
     while remaining:
@@ -127,7 +135,8 @@ def tw_aware_insertion(solution, removed_customers, traffic, demands,
             for v, route in enumerate(solution.routes):
                 nodes, cost, _ = _eval_insertion(
                     route, cid, traffic, demands, service_times,
-                    windows_open, windows_close, lambda_1, lambda_2)
+                    windows_open, windows_close, lambda_1, lambda_2,
+                    capacity=capacity)
                 if nodes is not None and cost < best_cost:
                     best_cost = cost
                     best_nodes = nodes
@@ -148,7 +157,8 @@ def tw_aware_insertion(solution, removed_customers, traffic, demands,
             for v, route in enumerate(solution.routes):
                 nodes, cost, _ = _eval_insertion(
                     route, best_cid, traffic, demands, service_times,
-                    windows_open, windows_close, lambda_1, lambda_2)
+                    windows_open, windows_close, lambda_1, lambda_2,
+                    capacity=capacity)
                 if nodes is not None:
                     best_info = (v, nodes)
                     break

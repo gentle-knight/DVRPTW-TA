@@ -72,7 +72,8 @@ class Route:
                 return False
         return True
 
-    def forward_propagate(self, traffic, demands, service_times, windows_open, windows_close):
+    def forward_propagate(self, traffic, demands, service_times, windows_open, windows_close,
+                          use_reliability_margin=True):
         arrivals = []
         starts = []
         departures = []
@@ -85,7 +86,10 @@ class Route:
 
         for idx in range(1, len(self.nodes)):
             cur = self.nodes[idx]
-            tt = traffic.travel_time(prev, cur, T)
+            if use_reliability_margin:
+                tt = traffic.adjusted_time(prev, cur, T)
+            else:
+                tt = traffic.travel_time(prev, cur, T)
             cc = traffic.congestion_cost(prev, cur, T)
 
             if idx == len(self.nodes) - 1 and cur == N_DEPOT:
@@ -124,9 +128,10 @@ class Route:
         }
 
     def compute_cost(self, traffic, demands, service_times, windows_open, windows_close,
-                     lambda_1=1.0, lambda_2=0.5):
+                     lambda_1=1.0, lambda_2=0.5, use_reliability_margin=True):
         result = self.forward_propagate(
-            traffic, demands, service_times, windows_open, windows_close
+            traffic, demands, service_times, windows_open, windows_close,
+            use_reliability_margin=use_reliability_margin
         )
         return (result['travel_cost']
                 + lambda_2 * result['congestion_cost']
@@ -157,7 +162,7 @@ class Solution:
         return set(self.all_customers())
 
     def compute_cost(self, traffic, demands, service_times, windows_open, windows_close,
-                     lambda_1=1.0, lambda_2=0.5):
+                     lambda_1=1.0, lambda_2=0.5, use_reliability_margin=True):
         travel = 0.0
         congestion = 0.0
         lateness = 0.0
@@ -165,7 +170,8 @@ class Solution:
         for r in self.routes:
             cost, result = r.compute_cost(
                 traffic, demands, service_times, windows_open, windows_close,
-                lambda_1, lambda_2)
+                lambda_1, lambda_2,
+                use_reliability_margin=use_reliability_margin)
             travel += result['travel_cost']
             congestion += result['congestion_cost']
             lateness += result['lateness_penalty']
@@ -180,7 +186,7 @@ class Solution:
             'route_details': details,
         }
 
-    def is_valid(self, demands, capacity):
+    def is_valid(self, demands, capacity, n_customers=None):
         all_seen = set()
         for r in self.routes:
             for n in r.customer_nodes():
@@ -188,6 +194,10 @@ class Solution:
                     return False
                 all_seen.add(n)
             if r.total_demand(demands) > capacity:
+                return False
+        if n_customers is not None:
+            expected = set(range(1, n_customers + 1))
+            if all_seen != expected:
                 return False
         return True
 

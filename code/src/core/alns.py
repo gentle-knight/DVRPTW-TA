@@ -116,7 +116,7 @@ def run_alns(traffic, demands, service_times, windows_open, windows_close,
         REPAIR_OPS[r_name](
             working, removed, traffic, demands, service_times,
             windows_open, windows_close, lambda_1=lambda_1, lambda_2=lambda_2,
-            rng=iter_rng)
+            capacity=120.0, rng=iter_rng)
 
         new_cost, _ = working.compute_cost(
             traffic, demands, service_times, windows_open, windows_close,

@@ -264,7 +264,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                 REPAIR_OPS[r_name](
                     candidate, cand_removed, traffic, demands, service_times,
                     windows_open, windows_close, lambda_1=lambda_1, lambda_2=lambda_2,
-                    rng=iter_rng)
+                    capacity=120.0, rng=iter_rng)
 
                 if sol_tabu.is_tabu(candidate, it):
                     continue
@@ -300,7 +300,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                 REPAIR_OPS[r_name](
                     working, removed, traffic, demands, service_times,
                     windows_open, windows_close, lambda_1=lambda_1, lambda_2=lambda_2,
-                    rng=iter_rng)
+                    capacity=120.0, rng=iter_rng)
 
                 used_d = d_name
                 used_r = r_name

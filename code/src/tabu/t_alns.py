@@ -140,7 +140,7 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
             REPAIR_OPS[r_name](
                 candidate, cand_removed, traffic, demands, service_times,
                 windows_open, windows_close, lambda_1=lambda_1, lambda_2=lambda_2,
-                rng=iter_rng)
+                capacity=120.0, rng=iter_rng)
 
             total_candidates += 1
             cand_cost, cand_detail = candidate.compute_cost(
@@ -211,7 +211,7 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
             REPAIR_OPS[r_name](
                 working, removed, traffic, demands, service_times,
                 windows_open, windows_close, lambda_1=lambda_1, lambda_2=lambda_2,
-                rng=iter_rng)
+                capacity=120.0, rng=iter_rng)
 
             total_candidates += 1
             used_d = d_name
