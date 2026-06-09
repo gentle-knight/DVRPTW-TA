@@ -8,17 +8,16 @@ Three conditions permit tabu moves when they show high potential:
 """
 
 
-def check_aspiration(new_cost, best_cost, solution=None, frequency=None,
-                     customer_id=None, vehicle_id=None,
+def check_aspiration(new_cost, best_cost, frequency=None,
+                     min_freq_value=None,
                      beta=0.3, gamma=0.7,
                      new_congestion=None, current_congestion=None):
     if new_cost < best_cost:
         return True, 'global_best'
 
-    if frequency is not None and customer_id is not None and vehicle_id is not None:
-        min_freq = frequency.least_frequent_assignment(customer_id)
+    if frequency is not None and min_freq_value is not None:
         mean_freq = frequency.mean_frequency()
-        if min_freq < beta * mean_freq:
+        if min_freq_value < beta * mean_freq:
             return True, 'least_frequency'
 
     if new_congestion is not None and current_congestion is not None and current_congestion > 0:

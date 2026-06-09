@@ -55,14 +55,30 @@ def main():
     print(f"  Average edge length: {stats.get('street_length_avg', 'N/A'):.1f} m")
 
     road_types = {}
+    total_edges = len(G.edges)
     for u, v, k, data in G.edges(keys=True, data=True):
         hwy = data.get('highway', 'unclassified')
         if isinstance(hwy, list):
             hwy = hwy[0]
         road_types[hwy] = road_types.get(hwy, 0) + 1
 
+    arterial = sum(road_types.get(t, 0) for t in
+                   ('motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link'))
+    collector = sum(road_types.get(t, 0) for t in
+                    ('secondary', 'secondary_link', 'tertiary', 'tertiary_link'))
+    residential = sum(road_types.get(t, 0) for t in
+                      ('residential', 'living_street'))
+    service = sum(road_types.get(t, 0) for t in
+                  ('unclassified', 'service'))
+
+    print(f"\n  Road classification (paper: arterial 18%, collector 34%, residential 41%, service 7%):")
+    print(f"    arterial:    {arterial} edges ({100*arterial/total_edges:.1f}%)")
+    print(f"    collector:   {collector} edges ({100*collector/total_edges:.1f}%)")
+    print(f"    residential: {residential} edges ({100*residential/total_edges:.1f}%)")
+    print(f"    service:     {service} edges ({100*service/total_edges:.1f}%)")
+
     for hwy, count in sorted(road_types.items(), key=lambda x: -x[1]):
-        print(f"  {hwy}: {count} edges ({100*count/len(G.edges):.1f}%)")
+        print(f"    [raw] {hwy}: {count} edges ({100*count/total_edges:.1f}%)")
 
     graph_path = os.path.join(DATA_DIR, 'shanghai_road_graph.pkl')
     with open(graph_path, 'wb') as f:

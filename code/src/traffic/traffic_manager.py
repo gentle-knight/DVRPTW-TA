@@ -31,32 +31,50 @@ class TrafficManager:
 
         self.HOUR_START = 6
 
+        valid_mask = (self.free_flow < 9999) & (self.free_flow > 0)
+        self._fallback_tt = float(self.free_flow[valid_mask].mean()) if valid_mask.any() else 5.0
+        self._fallback_gamma = float(self.tensor[:, :, :, 1][:, :, :][valid_mask].mean()) if valid_mask.any() else 0.3
+        self._fallback_eta = float(self.tensor[:, :, :, 2][:, :, :][valid_mask].mean()) if valid_mask.any() else 1.0
+
+    def _safe_index(self, i, j):
+        if i >= self.n_nodes or j >= self.n_nodes or i < 0 or j < 0:
+            return False, -1, -1
+        return True, i, j
+
     def interval_of(self, minutes):
         h = int(minutes // 60)
         return max(0, min(h, self.n_intervals - 1))
 
     def travel_time(self, i, j, departure_minutes):
-        """t_ij(T_i) — Eq.8"""
+        ok, i, j = self._safe_index(i, j)
+        if not ok:
+            return self._fallback_tt
         h = self.interval_of(departure_minutes)
-        return float(self.tensor[i, j, h, 0])
+        t = float(self.tensor[i, j, h, 0])
+        return t if t < 9999 else self._fallback_tt
 
     def congestion_density(self, i, j, departure_minutes):
-        """γ_ij^(h) ∈ [0,1] — raw density from tensor, Eq.9"""
+        ok, i, j = self._safe_index(i, j)
+        if not ok:
+            return self._fallback_gamma
         h = self.interval_of(departure_minutes)
         return float(self.tensor[i, j, h, 1])
 
     def congestion_cost(self, i, j, departure_minutes):
-        """ρ_ij(T_i) = θ · γ_ij^(h) — Eq.9, enters objective weighted by λ₂"""
         return self.theta * self.congestion_density(i, j, departure_minutes)
 
     def reliability_margin(self, i, j, departure_minutes):
-        """η_ij^(h) — Eq.10"""
+        ok, i, j = self._safe_index(i, j)
+        if not ok:
+            return self._fallback_eta
         h = self.interval_of(departure_minutes)
         return float(self.tensor[i, j, h, 2])
 
     def adjusted_time(self, i, j, departure_minutes):
-        """t_ij + β·η_ij — Eq.10"""
         return self.travel_time(i, j, departure_minutes) + self.beta * self.reliability_margin(i, j, departure_minutes)
 
     def free_flow_time(self, i, j):
+        ok, i, j = self._safe_index(i, j)
+        if not ok:
+            return self._fallback_tt
         return float(self.free_flow[i, j])

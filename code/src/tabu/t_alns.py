@@ -53,6 +53,7 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
     best_cost, best_detail = best.compute_cost(
         traffic, demands, service_times, windows_open, windows_close,
         lambda_1=lambda_1, lambda_2=lambda_2)
+    current_cost = best_cost
     m0 = compute_metrics(best, traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
 
     move_tabu = MoveTabuList(tenure=7)
@@ -64,13 +65,14 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
     repair_names = list(REPAIR_OPS.keys())
     d_weights = {n: 1.0 for n in destroy_names}
     r_weights = {n: 1.0 for n in repair_names}
+    d_seg_rewards = {n: 0.0 for n in destroy_names}
+    r_seg_rewards = {n: 0.0 for n in repair_names}
 
     T_init = 0.05 * best_cost
     T = T_init
 
     history = []
     improvements = 0
-    stale_count = 0
     last_best_iter = 0
     tabu_reject_count = 0
     sol_revisit_count = 0
@@ -154,18 +156,21 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
                 tabu_reject_count += 1
 
             if is_tabu_move or is_tabu_sol:
-                sample_cid = cand_removed[0] if cand_removed else 1
+                min_freq = float('inf')
+                for cid in cand_removed:
+                    fv = freq_memory.least_frequent_assignment(cid)
+                    if fv < min_freq:
+                        min_freq = fv
                 sample_v = 0
                 for v_idx, r in enumerate(candidate.routes):
-                    if sample_cid in r.customer_nodes():
+                    if cand_removed[0] in r.customer_nodes():
                         sample_v = v_idx
                         break
 
                 aspired, asp_reason = check_aspiration(
                     cand_cost, best_cost,
                     frequency=freq_memory,
-                    customer_id=sample_cid,
-                    vehicle_id=sample_v,
+                    min_freq_value=min_freq,
                     beta=aspiration_beta, gamma=aspiration_gamma,
                     new_congestion=cand_detail['congestion_cost'],
                     current_congestion=best_detail['congestion_cost'],
@@ -215,57 +220,65 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
         new_cost, new_detail = working.compute_cost(
             traffic, demands, service_times, windows_open, windows_close,
             lambda_1=lambda_1, lambda_2=lambda_2)
-        delta = new_cost - best_cost
+        delta = new_cost - current_cost
 
         reward = REWARD_SIGMA4
         accepted = False
-        if delta < 0:
+        is_new_best = new_cost < best_cost
+        if is_new_best:
             accepted = True
             best = working.copy()
             best_cost = new_cost
             best_detail = new_detail
             current = working.copy()
+            current_cost = new_cost
             improvements += 1
-            stale_count = 0
             last_best_iter = it
             move_tabu.report_improvement()
-            reward = REWARD_SIGMA1 if delta < -1.0 else REWARD_SIGMA2
+            reward = REWARD_SIGMA1
+        elif delta < 0:
+            accepted = True
+            current = working.copy()
+            current_cost = new_cost
+            reward = REWARD_SIGMA2
         else:
             prob = np.exp(-delta / max(T, 1e-8))
             if iter_rng.random() < prob:
                 accepted = True
                 current = working.copy()
+                current_cost = new_cost
                 reward = REWARD_SIGMA3
-                stale_count += 1
                 move_tabu.report_stagnation()
                 accepted_worse_count += 1
             else:
-                stale_count += 1
                 move_tabu.report_stagnation()
 
         if accepted:
             move_tabu.add(removed, used_d, used_r, it)
             sol_tabu.add(working, it)
-            freq_memory.update(working)
+            cong_weights = []
+            for r in working.routes:
+                _, rd = r.compute_cost(traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
+                cong_weights.append(rd['congestion_cost'])
+            freq_memory.update(working, congestion_weights=cong_weights)
+
+        d_seg_rewards[used_d] += reward
+        r_seg_rewards[used_r] += reward
 
         if it % segment_size == 0:
             for n in destroy_names:
-                d_weights[n] = (1.0 - reaction_factor) * d_weights[n]
+                d_weights[n] = (1.0 - reaction_factor) * d_weights[n] + reaction_factor * d_seg_rewards[n]
+                d_seg_rewards[n] = 0.0
             for n in repair_names:
-                r_weights[n] = (1.0 - reaction_factor) * r_weights[n]
-
-        if accepted:
-            if used_d and used_d in d_weights:
-                d_weights[used_d] += reaction_factor * reward
-            if used_r and used_r in r_weights:
-                r_weights[used_r] += reaction_factor * reward
+                r_weights[n] = (1.0 - reaction_factor) * r_weights[n] + reaction_factor * r_seg_rewards[n]
+                r_seg_rewards[n] = 0.0
 
         T *= cooling_rate
         history.append(best_cost)
 
-        if verbose and (it % 200 == 0 or (accepted and delta < -5.0)):
+        if verbose and (it % 200 == 0 or (accepted and is_new_best)):
             m = compute_metrics(best, traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
-            tag = '*BEST' if delta < 0 else ('acc' if accepted else 'rej')
+            tag = '*BEST' if is_new_best else ('acc' if accepted else 'rej')
             div_tag = 'DIV' if delta_intensity > delta_max else '   '
             print(f'T-ALNS-FULL | iter={it:5d} | T={T:.1f} | travel={m["travel"]:7.1f} '
                   f'late={m["lateness"]:6.1f} cong={m["congestion"]:5.2f} '

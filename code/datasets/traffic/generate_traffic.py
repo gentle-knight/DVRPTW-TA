@@ -1,13 +1,34 @@
 #!/usr/bin/env python3
 """
-Phase 2: Generate time-indexed traffic tensor for 48 nodes × 12 intervals × 3 params.
+Phase 2: Generate time-indexed traffic tensor for 48 nodes x 12 intervals x 3 params.
 
-Paper: DVRPTW-TA with t_ij(T_i), ρ_ij(T_i), η_ij(h) — Eqs. (8)–(10)
+Paper: DVRPTW-TA with t_ij(T_i), rho_ij(T_i), eta_ij(h) -- Eqs. (8)-(10)
+
+Data source: Synthetic traffic profiles based on OSM road network topology only.
+Travel times derived from shortest-path free-flow speeds with time-dependent
+congestion multipliers. Congestion density and reliability margins are
+synthesized approximations.
+
+Known limitations vs the paper:
+- Eq.(8) travel times include road-type-weighted peak amplification
+  (class_weighted_mult) not present in the paper formula -- this is an
+  OSM-based synthesis enhancement capturing differential congestion
+  sensitivity across road types.
+- eta_ij^(h) (reliability margin) is generated multiplicatively
+  (eta = t * variability) as a synthetic approximation of empirical
+  standard deviations. Usage layer (adjusted_time) correctly implements
+  the additive form of Eq.(10).
+- Traffic data covers 06:00-18:00 only; evening TW customers (17:00-20:00)
+  have no t_ij^(h) data beyond h=11 (17:00-18:00), falling back to the
+  last available interval values.
+- Road classification: O-D path composition uses 5 classes (arterial,
+  collector, tertiary, residential, service). The paper's 4-class scheme
+  applies to raw network segments (see download_osm_network.py).
 
 Data flow:
-  OSM graph → all-pairs shortest paths → road-type composition per O-D pair
-  → time-dependent speed factors × 12 intervals
-  → traffic_tensor.npz [48, 48, 12, 3]
+  OSM graph -> all-pairs shortest paths -> road-type composition per O-D pair
+  -> time-dependent speed factors x 12 intervals
+  -> traffic_tensor.npz [48, 48, 12, 3]
 
 Outputs:
   datasets/traffic/traffic_tensor.npz

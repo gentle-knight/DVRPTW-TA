@@ -63,22 +63,22 @@ def run_alns(traffic, demands, service_times, windows_open, windows_close,
     best_cost, _ = best.compute_cost(
         traffic, demands, service_times, windows_open, windows_close,
         lambda_1=lambda_1, lambda_2=lambda_2)
+    current_cost = best_cost
     m0 = compute_metrics(best, traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
 
     destroy_names = list(DESTROY_OPS.keys())
     repair_names = list(REPAIR_OPS.keys())
     d_weights = {n: 1.0 for n in destroy_names}
     r_weights = {n: 1.0 for n in repair_names}
-
-    n_destroy = len(destroy_names)
-    n_repair = len(repair_names)
+    d_seg_rewards = {n: 0.0 for n in destroy_names}
+    r_seg_rewards = {n: 0.0 for n in repair_names}
 
     T_init = 0.05 * best_cost
     T = T_init
 
     history = []
     improvements = 0
-    stale_count = 0
+    accepted_worse = 0
 
     if verbose:
         print(f'ALNS | iter={0:5d} | T={T:.1f} | travel={m0["travel"]:7.1f} '
@@ -121,48 +121,50 @@ def run_alns(traffic, demands, service_times, windows_open, windows_close,
         new_cost, _ = working.compute_cost(
             traffic, demands, service_times, windows_open, windows_close,
             lambda_1=lambda_1, lambda_2=lambda_2)
-        delta = new_cost - best_cost
+        delta = new_cost - current_cost
 
         reward = REWARD_SIGMA4
         accepted = False
-        if delta < 0:
+        is_new_best = new_cost < best_cost
+        if is_new_best:
             accepted = True
             best = working.copy()
             best_cost = new_cost
             current = working.copy()
+            current_cost = new_cost
             improvements += 1
-            stale_count = 0
-            if delta < -1.0:
-                reward = REWARD_SIGMA1
-            else:
-                reward = REWARD_SIGMA2
+            reward = REWARD_SIGMA1
+        elif delta < 0:
+            accepted = True
+            current = working.copy()
+            current_cost = new_cost
+            reward = REWARD_SIGMA2
         else:
             prob = np.exp(-delta / max(T, 1e-8))
             if iter_rng.random() < prob:
                 accepted = True
                 current = working.copy()
+                current_cost = new_cost
                 reward = REWARD_SIGMA3
-                stale_count += 1
-            else:
-                stale_count += 1
+                accepted_worse += 1
+
+        d_seg_rewards[d_name] += reward
+        r_seg_rewards[r_name] += reward
 
         if it % segment_size == 0:
             for n in destroy_names:
-                d_weights[n] = (1.0 - reaction_factor) * d_weights[n]
+                d_weights[n] = (1.0 - reaction_factor) * d_weights[n] + reaction_factor * d_seg_rewards[n]
+                d_seg_rewards[n] = 0.0
             for n in repair_names:
-                r_weights[n] = (1.0 - reaction_factor) * r_weights[n]
-
-        if accepted and d_name in d_weights:
-            d_weights[d_name] += reaction_factor * reward
-        if accepted and r_name in r_weights:
-            r_weights[r_name] += reaction_factor * reward
+                r_weights[n] = (1.0 - reaction_factor) * r_weights[n] + reaction_factor * r_seg_rewards[n]
+                r_seg_rewards[n] = 0.0
 
         T *= cooling_rate
         history.append(best_cost)
 
-        if verbose and (it % 200 == 0 or (accepted and delta < -5.0)):
+        if verbose and (it % 200 == 0 or (accepted and is_new_best)):
             m = compute_metrics(best, traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
-            tag = '*BEST' if delta < 0 else ' acc'
+            tag = '*BEST' if is_new_best else 'acc'
             print(f'ALNS | iter={it:5d} | T={T:.1f} | travel={m["travel"]:7.1f} '
                   f'late={m["lateness"]:6.1f} cong={m["congestion"]:5.2f} '
                   f'total={m["total"]:7.1f} OTDR={m["otdr"]:5.1f}% CES={m["ces"]:5.2f} '
@@ -172,7 +174,7 @@ def run_alns(traffic, demands, service_times, windows_open, windows_close,
     final = compute_metrics(best, traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
 
     if verbose:
-        print(f'\nALNS done | {max_iter} iters {elapsed:.1f}s | {improvements} improvements')
+        print(f'\nALNS done | {max_iter} iters {elapsed:.1f}s | {improvements} improvements | {accepted_worse} acc-worse')
         print(f'  travel={final["travel"]:.1f} late={final["lateness"]:.1f} cong={final["congestion"]:.2f} '
               f'total={final["total"]:.1f} OTDR={final["otdr"]:.1f}% CES={final["ces"]:.2f}')
         dw = ', '.join(f'{n}={w:.2f}' for n, w in sorted(d_weights.items()))
