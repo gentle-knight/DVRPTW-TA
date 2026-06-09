@@ -56,7 +56,8 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                    max_iter=1000, event_iterations=(250, 500, 750),
                    lambda_1=1.0, lambda_2=0.5,
                    cooling_rate=0.99975, reaction_factor=0.1, segment_size=100,
-                   max_attempts=10, seed=42, verbose=True):
+                   max_attempts=10, seed=42, verbose=True,
+                   dispatch_mode='rollout'):
     rng = np.random.RandomState(seed)
 
     t0 = time.time()
@@ -125,13 +126,40 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                 eval_tm = traffic
 
             if event and candidates:
-                chosen, result = dispatch_action(
-                    event, candidates, current, traffic, demands, service_times,
-                    windows_open, windows_close, lambda_1, lambda_2,
-                    horizon_minutes=60,
-                    move_tabu=move_tabu, sol_tabu=sol_tabu, current_iter=it)
+                if dispatch_mode == 'none':
+                    dispatch_log.append({
+                        'iter': it, 'event_type': etype.name, 'action': 'none',
+                        'success': True, 'response_time_ms': 0,
+                        'pre_cost': pre_cost, 'post_cost': pre_cost,
+                        'delay_reduction': 0, 'congestion_reduction': 0,
+                        'route_change_ratio': 0, 'candidates_count': 0,
+                    })
+                    if verbose:
+                        print(f'RRD | ACTION: none (no-dispatch) | cost {pre_cost:.1f}')
+                elif dispatch_mode == 'greedy':
+                    best_immediate = float('inf')
+                    best_greedy_candidate = None
+                    for cand in candidates:
+                        ic, _ = cand['solution'].compute_cost(
+                            eval_tm, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
+                        if ic < best_immediate:
+                            best_immediate = ic
+                            best_greedy_candidate = cand
+                    if best_greedy_candidate:
+                        chosen = best_greedy_candidate
+                        current = chosen['solution']
+                        result = {'success': True, 'response_time_ms': 0, 'rollout_cost': best_immediate,
+                                  'stability_penalty': 0, 'chosen_action': chosen['name']}
+                    else:
+                        chosen = None
+                else:
+                    chosen, result = dispatch_action(
+                        event, candidates, current, traffic, demands, service_times,
+                        windows_open, windows_close, lambda_1, lambda_2,
+                        horizon_minutes=60,
+                        move_tabu=move_tabu, sol_tabu=sol_tabu, current_iter=it)
 
-                if chosen and result['success']:
+                if dispatch_mode != 'none' and chosen and result.get('success'):
                     current = chosen['solution']
 
                     eff_demands = demands
@@ -153,12 +181,6 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                     delay_reduction = pre_detail['lateness_penalty'] - post_detail['lateness_penalty']
                     cong_reduction = pre_detail['congestion_cost'] - post_detail['congestion_cost']
 
-                    pre_custs = set()
-                    post_custs = set()
-                    for r in pre_solution.routes:
-                        pre_custs.update(r.customer_nodes())
-                    for r in current.routes:
-                        post_custs.update(r.customer_nodes())
                     route_change = 0.0
                     for r_idx in range(4):
                         pre_set = set(pre_solution.routes[r_idx].customer_nodes())
@@ -173,42 +195,43 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                         'event_type': etype.name,
                         'action': chosen['name'],
                         'success': True,
-                        'response_time_ms': result['response_time_ms'],
+                        'response_time_ms': result.get('response_time_ms', 0),
                         'pre_cost': pre_cost,
                         'post_cost': post_cost,
                         'delay_reduction': delay_reduction,
                         'congestion_reduction': cong_reduction,
                         'route_change_ratio': route_change,
                         'candidates_count': len(candidates),
-                        'rollout_cost': result.get('rollout_cost', 0),
-                        'stability_penalty': result.get('stability_penalty', 0),
+                        'dispatch_mode': dispatch_mode,
                     }
                     dispatch_log.append(log_entry)
 
                     if verbose:
-                        print(f'RRD | ACTION: {chosen["name"]} | rt={result["response_time_ms"]:.1f}ms '
-                              f'| cost {pre_cost:.1f}→{post_cost:.1f} | '
+                        print(f'RRD | ACTION: {chosen["name"]} | mode={dispatch_mode} | '
+                              f'cost {pre_cost:.1f}→{post_cost:.1f} | '
                               f'delay_red={delay_reduction:.1f} cong_red={cong_reduction:.2f} '
                               f'route_chg={route_change:.3f} | {len(candidates)} candidates')
-                else:
+
+                    if move_tabu and chosen:
+                        for r in chosen['solution'].routes:
+                            cids = r.customer_nodes()
+                            if cids:
+                                move_tabu.add(cids, 'dispatch', 'dispatch', it)
+                    if sol_tabu and chosen:
+                        sol_tabu.add(chosen['solution'], it)
+                    if freq_memory and chosen:
+                        cong_w = []
+                        for r in chosen['solution'].routes:
+                            c, rd = r.compute_cost(traffic, eff_demands, eff_service_times, eff_windows_open, eff_windows_close, lambda_1, lambda_2)
+                            cong_w.append(rd['congestion_cost'])
+                        freq_memory.update(chosen['solution'], congestion_weights=cong_w)
+
+                elif dispatch_mode != 'none':
                     dispatch_log.append({
                         'iter': it, 'event_type': etype.name, 'success': False,
-                        'response_time_ms': result.get('response_time_ms', 0),
+                        'response_time_ms': result.get('response_time_ms', 0) if result else 0,
+                        'dispatch_mode': dispatch_mode,
                     })
-
-                if move_tabu and chosen:
-                    for r in chosen['solution'].routes:
-                        cids = r.customer_nodes()
-                        if cids:
-                            move_tabu.add(cids, 'dispatch', 'dispatch', it)
-                if sol_tabu and chosen:
-                    sol_tabu.add(chosen['solution'], it)
-                if freq_memory and chosen:
-                    cong_w = []
-                    for r in chosen['solution'].routes:
-                        c, rd = r.compute_cost(traffic, eff_demands, eff_service_times, eff_windows_open, eff_windows_close, lambda_1, lambda_2)
-                        cong_w.append(rd['congestion_cost'])
-                    freq_memory.update(chosen['solution'], congestion_weights=cong_w)
 
             event_idx += 1
             it += 1
