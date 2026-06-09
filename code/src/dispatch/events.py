@@ -17,6 +17,7 @@ from core.solution import N_DEPOT
 class EventType(Enum):
     E1_TRAFFIC = 1
     E2_URGENT = 2
+    E3_CAPACITY = 3
     E4_TIME_RISK = 4
 
 
@@ -117,4 +118,24 @@ def inject_time_window_risk(solution, traffic, demands, service_times,
         'vehicle': event['vehicle'],
         'customer': event['customer'],
         'slack_minutes': event['slack_minutes'],
+    }
+
+
+def inject_capacity_violation(solution, demands, capacity=120.0, rng=None):
+    routes_near_capacity = []
+    for v, route in enumerate(solution.routes):
+        total = route.total_demand(demands)
+        if total > capacity * 0.9:
+            routes_near_capacity.append((v, total))
+
+    if not routes_near_capacity:
+        return None
+
+    v, load = routes_near_capacity[0]
+    return {
+        'type': EventType.E3_CAPACITY,
+        'description': f'capacity violation risk: V{v+1} load={load:.1f}/{capacity}',
+        'vehicle': v,
+        'current_load': load,
+        'capacity': capacity,
     }

@@ -26,7 +26,7 @@ REWARD_SIGMA4 = 0.5
 def run_alns(traffic, demands, service_times, windows_open, windows_close,
              max_iter=1000, lambda_1=1.0, lambda_2=0.5,
              cooling_rate=0.99975, reaction_factor=0.1,
-             segment_size=100, seed=42, verbose=True):
+             segment_size=100, seed=42, verbose=True, t_max=600):
 
     rng = np.random.RandomState(seed)
 
@@ -63,6 +63,8 @@ def run_alns(traffic, demands, service_times, windows_open, windows_close,
               f'total={m0["total"]:7.1f} OTDR={m0["otdr"]:5.1f}% CES={m0["ces"]:5.2f} | init')
 
     for it in range(1, max_iter + 1):
+        if time.time() - t0 > t_max:
+            break
         iter_rng = np.random.RandomState(rng.randint(0, 2**31 - 1))
 
         d_probs = np.array([d_weights[n] for n in destroy_names])

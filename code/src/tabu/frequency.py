@@ -58,3 +58,15 @@ class FrequencyMemory:
         if total < 1e-6:
             return 0.0
         return float(1.0 / (1.0 + self.F_cv[customer_id, vehicle_id]))
+
+    def resize(self, n_customers):
+        if n_customers <= self.n_customers:
+            return
+        old_cv = self.F_cv
+        old_tp = self.F_tp
+        old_n = self.n_customers
+        self.F_cv = np.zeros((n_customers + 1, self.n_vehicles), dtype=np.float32)
+        self.F_tp = np.zeros((n_customers + 1, n_customers + 1), dtype=np.float32)
+        self.F_cv[:old_n + 1, :] = old_cv
+        self.F_tp[:old_n + 1, :old_n + 1] = old_tp
+        self.n_customers = n_customers

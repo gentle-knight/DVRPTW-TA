@@ -42,7 +42,7 @@ ALL_ALGORITHMS = {
     'T-ALNS-RRD': 't_alns_rrd',
 }
 
-def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, windows_close):
+def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, windows_close, t_max=600):
     t0 = time.time()
 
     if alg_name == 'Static-VRPTW':
@@ -58,15 +58,15 @@ def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, 
     elif alg_name == 'ALNS-Base':
         _, m, _ = run_alns(tm, demands, service_times, windows_open, windows_close,
                            max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
-                           seed=seed, verbose=False)
+                           seed=seed, verbose=False, t_max=t_max)
     elif alg_name == 'T-ALNS':
         _, m, _, _ = run_t_alns_full(tm, demands, service_times, windows_open, windows_close,
                                      max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
-                                     seed=seed, verbose=False)
+                                     seed=seed, verbose=False, t_max=t_max)
     elif alg_name == 'T-ALNS-RRD':
         _, m, _ = run_t_alns_rrd(tm, demands, service_times, windows_open, windows_close,
                                  max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
-                                 seed=seed, verbose=False)
+                                 seed=seed, verbose=False, t_max=t_max)
     else:
         raise ValueError(f'Unknown algorithm: {alg_name}')
 
@@ -80,7 +80,8 @@ def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, 
 def main():
     parser = argparse.ArgumentParser(description='T-ALNS-RRD Main Experiment Runner')
     parser.add_argument('--seeds', type=int, default=30, help='Number of random seeds (default: 30)')
-    parser.add_argument('--iters', type=int, default=800, help='Max ALNS iterations (default: 800)')
+    parser.add_argument('--iters', type=int, default=1000, help='Max ALNS iterations (default: 1000)')
+    parser.add_argument('--tmax', type=int, default=600, help='Max runtime per seed in seconds (default: 600)')
     parser.add_argument('--algo', type=str, default=None,
                         help='Comma-separated algorithm names. Default: all 5')
     parser.add_argument('--instance', type=str, default='easy', choices=['easy', 'medium'],
@@ -116,7 +117,7 @@ def main():
         alg_rows = []
 
         for seed in range(1, n_seeds + 1):
-            m = run_one(alg_display, seed, max_iter, tm, demands, service_times, windows_open, windows_close)
+            m = run_one(alg_display, seed, max_iter, tm, demands, service_times, windows_open, windows_close, t_max=args.tmax)
             alg_rows.append(m)
 
             print(f'  seed={seed:2d}: total={m["total"]:7.1f} travel={m["travel"]:7.1f} '

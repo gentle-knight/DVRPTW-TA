@@ -37,7 +37,7 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
                     cooling_rate=0.99975, reaction_factor=0.1, segment_size=100,
                     max_attempts=10, delta_max=0.8, eta=0.6,
                     aspiration_beta=0.3, aspiration_gamma=0.7,
-                    seed=42, verbose=True):
+                    seed=42, verbose=True, t_max=600):
 
     rng = np.random.RandomState(seed)
     n_vehicles = 4
@@ -86,6 +86,8 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
               f'total={m0["total"]:7.1f} OTDR={m0["otdr"]:5.1f}% | init')
 
     for it in range(1, max_iter + 1):
+        if time.time() - t0 > t_max:
+            break
         iter_rng = np.random.RandomState(rng.randint(0, 2**31 - 1))
 
         delta_intensity = compute_intensity(

@@ -26,6 +26,28 @@ def generate_candidates_traffic(event, solution, traffic, demands, service_times
     pos = custs.index(cust_b)
     cust_a = custs[pos - 1] if pos > 0 else route.nodes[0]
 
+    # Candidate set 0: k-shortest detours (paper: K_s=5, Δ_max=8 min)
+    all_cust_ids = list(range(1, len(demands)))
+    rng.shuffle(all_cust_ids)
+    detour_samples = all_cust_ids[:min(30, len(all_cust_ids))]
+    original_tt = traffic.travel_time(cust_a, cust_b, 0)
+    detours = []
+    for mid_id in detour_samples:
+        if mid_id == cust_a or mid_id == cust_b or mid_id in custs:
+            continue
+        detour_time = traffic.travel_time(cust_a, mid_id, 0) + traffic.travel_time(mid_id, cust_b, 0)
+        extra = detour_time - original_tt
+        if extra <= 8.0:
+            detours.append((mid_id, extra))
+    detours.sort(key=lambda x: x[1])
+    for mid_id, _ in detours[:5]:
+        sol = solution.copy()
+        r = sol.routes[v]
+        c = r.customer_nodes()
+        c.insert(pos, mid_id)
+        r.nodes = [N_DEPOT] + c + [N_DEPOT]
+        candidates.append({'name': f'detour_via_{mid_id}', 'solution': sol, 'cost': None})
+
     # Candidate 1: local reroute — swap position of affected customer
     if pos + 1 < len(custs):
         sol1 = solution.copy()
@@ -181,5 +203,62 @@ def generate_candidates_time_risk(event, solution, traffic, demands, service_tim
     # Candidate 3: tolerance relax — accept extended time window
     sol = solution.copy()
     candidates.append({'name': 'tolerance_relax', 'solution': sol, 'cost': None, 'relax_tolerance': True})
+
+    return candidates
+
+
+def generate_candidates_capacity(event, solution, traffic, demands, service_times,
+                                 windows_open, windows_close, lambda_1, lambda_2, rng):
+    candidates = []
+    v = event['vehicle']
+    route = solution.routes[v]
+    custs = route.customer_nodes()
+
+    # Load redistribution: move lightest customer to nearest feasible vehicle
+    for v2 in range(len(solution.routes)):
+        if v2 == v:
+            continue
+        target_route = solution.routes[v2]
+        if target_route.total_demand(demands) > 100:
+            continue
+
+        sol = solution.copy()
+        src_route = sol.routes[v]
+        src_custs = src_route.customer_nodes()
+        if not src_custs:
+            continue
+
+        # Find lightest customer to transfer
+        best_cid = None
+        best_demand = float('inf')
+        best_pos_idx = -1
+        for pos, cid in enumerate(src_custs):
+            d = demands[cid]
+            if d < best_demand:
+                best_demand = d
+                best_cid = cid
+                best_pos_idx = pos
+
+        if best_cid is None:
+            continue
+
+        del src_custs[best_pos_idx]
+        src_route.nodes = [N_DEPOT] + src_custs + [N_DEPOT]
+
+        tgt_custs = sol.routes[v2].customer_nodes()
+        best_pos = 0
+        best_cost = float('inf')
+        best_nodes = None
+        for p in range(len(tgt_custs) + 1):
+            trial_nodes = [N_DEPOT] + tgt_custs[:p] + [best_cid] + tgt_custs[p:] + [N_DEPOT]
+            trial = Route(trial_nodes)
+            trial.departure_time = target_route.departure_time
+            c, _ = trial.compute_cost(traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
+            if c < best_cost:
+                best_cost = c
+                best_nodes = trial_nodes
+        if best_nodes:
+            sol.routes[v2].nodes = best_nodes
+            candidates.append({'name': f'redistribute_to_V{v2+1}', 'solution': sol, 'cost': None})
 
     return candidates
