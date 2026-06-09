@@ -23,8 +23,7 @@ from .candidates import (
 )
 from .dispatch import dispatch_action
 from core.solution import Solution, Route, N_DEPOT
-from core.alns import compute_metrics
-from tabu.t_alns import run_t_alns_full
+from utils.evaluation import compute_metrics
 from tabu.frequency import FrequencyMemory
 
 

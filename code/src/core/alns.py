@@ -11,30 +11,7 @@ from .solution import Solution, Route, N_DEPOT
 from .initialization import build_greedy_init
 from .destroy import random_removal, worst_removal, relatedness_removal
 from .repair import greedy_insertion, regret2_insertion, tw_aware_insertion
-
-
-def compute_metrics(solution, traffic, demands, service_times,
-                     windows_open, windows_close, lambda_1, lambda_2):
-    n_customers = len(demands) - 1
-    cost, details = solution.compute_cost(
-        traffic, demands, service_times, windows_open, windows_close,
-        lambda_1=lambda_1, lambda_2=lambda_2)
-
-    ontime = 0
-    for rd, route in zip(details['route_details'], solution.routes):
-        customers = route.customer_nodes()
-        for i in range(len(customers)):
-            if rd['latenesses'][i] == 0:
-                ontime += 1
-
-    return {
-        'travel': details['travel_cost'],
-        'lateness': details['lateness_penalty'],
-        'congestion': details['congestion_cost'],
-        'total': cost,
-        'otdr': ontime / n_customers * 100,
-        'ces': details['congestion_cost'],
-    }
+from utils.evaluation import compute_metrics
 
 
 DESTROY_OPS = {'random': random_removal, 'worst': worst_removal, 'related': relatedness_removal}

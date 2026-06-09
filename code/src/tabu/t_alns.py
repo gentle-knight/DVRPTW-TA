@@ -21,7 +21,7 @@ from core.solution import Route, N_DEPOT
 from core.initialization import build_greedy_init
 from core.destroy import random_removal, worst_removal, relatedness_removal
 from core.repair import greedy_insertion, regret2_insertion, tw_aware_insertion
-from core.alns import compute_metrics
+from utils.evaluation import compute_metrics
 
 DESTROY_OPS = {'random': random_removal, 'worst': worst_removal, 'related': relatedness_removal}
 REPAIR_OPS = {'greedy': greedy_insertion, 'regret2': regret2_insertion, 'tw_aware': tw_aware_insertion}
