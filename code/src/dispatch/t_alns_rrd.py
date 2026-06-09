@@ -90,6 +90,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                       f'late={m_pre["lateness"]:.1f} total={m_pre["total"]:.1f} OTDR={m_pre["otdr"]:.1f}%')
 
             pre_solution = current.copy()
+            eval_tm = traffic
             pre_cost, pre_detail = pre_solution.compute_cost(
                 eval_tm, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
 
