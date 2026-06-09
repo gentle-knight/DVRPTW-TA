@@ -17,7 +17,7 @@ import time
 import numpy as np
 from .events import (
     EventType, inject_traffic_incident, inject_urgent_order, inject_time_window_risk,
-    inject_capacity_violation
+    inject_capacity_violation, urgency_score
 )
 from .candidates import (
     generate_candidates_traffic, generate_candidates_urgent, generate_candidates_time_risk,
@@ -76,6 +76,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
     best_detail = None
     last_best_iter = 0
     aspiration_count = 0
+    history = []
     move_tabu = None
     sol_tabu = None
     freq_memory = None
@@ -191,16 +192,23 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                     else:
                         chosen = None
                 else:
+                    # Compute urgency for adaptive horizon (Eq.42-43)
+                    urg = urgency_score(
+                        event, current, traffic, demands, service_times,
+                        windows_open, windows_close, lambda_1, lambda_2)
+                    H_rollout = max(30, int(120 - 40 * urg))
+                    N_sim = max(1, min(20, int(urg * 30)))
+
                     chosen, result = dispatch_action(
                         event, candidates, current, traffic, demands, service_times,
                         windows_open, windows_close, lambda_1, lambda_2,
-                        horizon_minutes=60,
+                        horizon_minutes=H_rollout,
                         move_tabu=move_tabu, sol_tabu=sol_tabu,
-                        freq_memory=freq_memory, current_iter=it)
+                        freq_memory=freq_memory, current_iter=it,
+                        best_solution=best)
 
                 if dispatch_mode != 'none' and chosen and result.get('success'):
-                    current = chosen['solution']
-
+                    # Guardrail: verify dispatch didn't produce invalid solution
                     eff_demands = demands
                     eff_service_times = service_times
                     eff_windows_open = windows_open
@@ -208,11 +216,25 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
 
                     if 'extended_data' in chosen:
                         eff_demands, eff_service_times, eff_windows_open, eff_windows_close = chosen['extended_data']
-                        demands = eff_demands
-                        service_times = eff_service_times
-                        windows_open = eff_windows_open
-                        windows_close = eff_windows_close
-                        freq_memory.resize(n_customers=len(demands) - 1)
+
+                    if not chosen['solution'].is_valid(eff_demands, capacity=120.0):
+                        if verbose:
+                            print(f'RRD | WARNING: dispatch produced invalid solution, reverting')
+                        dispatch_log.append({
+                            'iter': it, 'event_type': etype.name, 'success': False,
+                            'response_time_ms': result.get('response_time_ms', 0),
+                            'dispatch_mode': dispatch_mode, 'reason': 'invalid',
+                        })
+                        event_idx += 1
+                        it += 1
+                        continue
+
+                    current = chosen['solution']
+                    demands = eff_demands
+                    service_times = eff_service_times
+                    windows_open = eff_windows_open
+                    windows_close = eff_windows_close
+                    freq_memory.resize(n_customers=len(demands) - 1)
 
                     post_cost, post_detail = current.compute_cost(
                         eval_tm, eff_demands, eff_service_times, eff_windows_open, eff_windows_close, lambda_1, lambda_2)
@@ -273,6 +295,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                     })
 
             event_idx += 1
+            history.append(best_cost)
             it += 1
             continue
 
@@ -494,6 +517,8 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
 
             T_sa *= cooling_rate
 
+            history.append(best_cost)
+
             if verbose and it % 200 == 0:
                 m = compute_metrics(best, traffic, demands, service_times,
                                     windows_open, windows_close, lambda_1, lambda_2)
@@ -520,4 +545,4 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                   f'pre_cost={log.get("pre_cost","?"):.1f}→post_cost={log.get("post_cost","?"):.1f} '
                   f'delay_red={log.get("delay_reduction","?"):.1f} cong_red={log.get("congestion_reduction","?"):.2f}')
 
-    return best, final, dispatch_log
+    return best, final, dispatch_log, history

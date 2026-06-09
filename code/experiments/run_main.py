@@ -56,15 +56,15 @@ def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, 
         sol = run_ta_greedy(tm, demands, service_times, windows_open, windows_close, seed=seed)
         m = compute_metrics(sol, tm, demands, service_times, windows_open, windows_close, LAMBDA_1, LAMBDA_2)
     elif alg_name == 'ALNS-Base':
-        _, m, _ = run_alns(tm, demands, service_times, windows_open, windows_close,
+        _, m, history = run_alns(tm, demands, service_times, windows_open, windows_close,
                            max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
                            seed=seed, verbose=False, t_max=t_max)
     elif alg_name == 'T-ALNS':
-        _, m, _, _ = run_t_alns_full(tm, demands, service_times, windows_open, windows_close,
+        _, m, history, stats = run_t_alns_full(tm, demands, service_times, windows_open, windows_close,
                                      max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
                                      seed=seed, verbose=False, t_max=t_max)
     elif alg_name == 'T-ALNS-RRD':
-        _, m, _ = run_t_alns_rrd(tm, demands, service_times, windows_open, windows_close,
+        _, m, _, history = run_t_alns_rrd(tm, demands, service_times, windows_open, windows_close,
                                  max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
                                  seed=seed, verbose=False, t_max=t_max)
     else:
@@ -128,6 +128,11 @@ def main():
             with open(row_path, 'w') as f:
                 json.dump({k: float(v) if isinstance(v, (np.floating, np.integer)) else v
                            for k, v in m.items()}, f, indent=2)
+
+            hist_path = run_dir / f'{alg_key}_seed{seed:02d}_history.json'
+            with open(hist_path, 'w') as f:
+                json.dump({'algorithm': alg_display, 'seed': seed,
+                           'history': [float(x) for x in history]}, f)
 
         means = {}
         stds = {}

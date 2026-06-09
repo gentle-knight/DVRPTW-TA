@@ -34,16 +34,24 @@ def adjust_probabilities(weights, diversity_scores, eta=0.6):
 
 
 def compute_diversity_scores(frequency, n_vehicles, operator_names):
-    scores = {}
-    for name in operator_names:
-        scores[name] = 1.0
-
-    total_diversity = 0.0
+    cv_total = 0.0
     for cid in range(1, frequency.n_customers + 1):
         for v in range(n_vehicles):
-            total_diversity += frequency.diversification_score(cid, v)
+            cv_total += frequency.diversification_score(cid, v)
 
+    base = 1.0 + 0.01 * cv_total
+
+    operator_traits = {
+        'random':  1.20,
+        'worst':   0.85,
+        'related': 1.10,
+        'greedy':  0.90,
+        'regret2': 1.05,
+        'tw_aware': 1.15,
+    }
+
+    scores = {}
     for name in operator_names:
-        scores[name] *= (1.0 + 0.01 * total_diversity)
-
+        trait = operator_traits.get(name, 1.0)
+        scores[name] = base * trait
     return scores

@@ -78,3 +78,31 @@ class TrafficManager:
         if not ok:
             return self._fallback_tt
         return float(self.free_flow[i, j])
+
+    def interpolated_travel_time(self, i, j, departure_minutes):
+        """Eq.37: piecewise-linear interpolated travel time for rollout.
+
+        t_ij^rollout(T_i + s) = t_ij^(r) + s/Δt * (t_ij^(r+1) - t_ij^(r))
+        If the next interval is unavailable, hold-last-value.
+        """
+        interval_size = 60
+        h = int(departure_minutes // interval_size)
+        frac = (departure_minutes % interval_size) / interval_size
+
+        ok, i, j = self._safe_index(i, j)
+        if not ok:
+            return self._fallback_tt
+
+        h = max(0, min(h, self.n_intervals - 1))
+        t_now = float(self.tensor[i, j, h, 0])
+        if t_now >= 9999:
+            t_now = self._fallback_tt
+
+        if h + 1 < self.n_intervals:
+            t_next = float(self.tensor[i, j, h + 1, 0])
+            if t_next >= 9999:
+                t_next = t_now
+        else:
+            t_next = t_now
+
+        return t_now + frac * (t_next - t_now)

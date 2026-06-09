@@ -31,9 +31,13 @@ def generate_candidates_traffic(event, solution, traffic, demands, service_times
     rng.shuffle(all_cust_ids)
     detour_samples = all_cust_ids[:min(30, len(all_cust_ids))]
     original_tt = traffic.travel_time(cust_a, cust_b, 0)
+    # Collect all served customers across all routes (Eq.3: each served once)
+    all_served = set()
+    for r in solution.routes:
+        all_served.update(r.customer_nodes())
     detours = []
     for mid_id in detour_samples:
-        if mid_id == cust_a or mid_id == cust_b or mid_id in custs:
+        if mid_id == cust_a or mid_id == cust_b or mid_id in all_served:
             continue
         detour_time = traffic.travel_time(cust_a, mid_id, 0) + traffic.travel_time(mid_id, cust_b, 0)
         extra = detour_time - original_tt

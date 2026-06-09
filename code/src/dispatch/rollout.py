@@ -27,7 +27,7 @@ def _single_rollout(solution, traffic, demands, service_times,
 
         for nid in nodes[1:]:
             if nid == N_DEPOT:
-                tt = traffic.travel_time(prev, nid, T)
+                tt = traffic.interpolated_travel_time(prev, nid, T)
                 if blocked_arc and (prev, nid) == blocked_arc:
                     tt *= 3.0
                 # inject noise: t' = t + beta * eta * epsilon  (Eq.10)
@@ -38,7 +38,7 @@ def _single_rollout(solution, traffic, demands, service_times,
                 T += tt
                 break
 
-            tt = traffic.travel_time(prev, nid, T)
+            tt = traffic.interpolated_travel_time(prev, nid, T)
             cc = traffic.congestion_cost(prev, nid, T)
 
             if blocked_arc and (prev, nid) == blocked_arc:
@@ -143,19 +143,16 @@ def compute_diversion_bonus(candidate_solution, freq_memory):
 def evaluate_candidate(candidate, original_solution, traffic, demands, service_times,
                        windows_open, windows_close, lambda_1, lambda_2,
                        horizon_minutes=60, blocked_arc=None, tabu_penalty=0.0,
-                       freq_memory=None, omega_1=0.70, omega_2=0.15, omega_3=0.15,
+                       freq_memory=None, omega_1=0.4, omega_2=0.3, omega_3=0.3,
                        n_samples=1, noise_scale=0.0,
-                       extended_data=None):
+                       extended_data=None,
+                       best_solution=None):
     """Evaluate candidate with composite score (Eq.40).
 
     score = omega_1 * cost + omega_2 * stability + omega_3 * recovery
           - diversion_bonus + tabu_penalty
 
-    Default weights (0.70/0.15/0.15) are tuned for synchronous simulation
-    with post-dispatch optimization. The paper's weights (0.4/0.3/0.3) are
-    designed for real-time dispatch without further optimization; override
-    omega_1-3 to match the paper for that context.
-
+    Default weights (0.4/0.3/0.3) match the paper's dispatch scoring.
     Uses exact compute_cost when n_samples=1/noise=0; falls back to
     short-horizon MC rollout when n_samples>1 for uncertainty simulation.
     Returns (score, cost, stability_penalty, recovery_penalty, mc_std).
@@ -180,7 +177,8 @@ def evaluate_candidate(candidate, original_solution, traffic, demands, service_t
         )
 
     sp = stability_penalty(candidate['solution'], original_solution)
-    rp = recovery_penalty(candidate['solution'], original_solution)
+    recovery_ref = best_solution if best_solution is not None else original_solution
+    rp = recovery_penalty(candidate['solution'], recovery_ref)
 
     score = omega_1 * rc + omega_2 * sp + omega_3 * rp
     score += tabu_penalty

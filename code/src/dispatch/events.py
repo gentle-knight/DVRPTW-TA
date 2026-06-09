@@ -139,3 +139,53 @@ def inject_capacity_violation(solution, demands, capacity=120.0, rng=None):
         'current_load': load,
         'capacity': capacity,
     }
+
+
+EVENT_WEIGHTS = {
+    EventType.E1_TRAFFIC:  (0.5, 0.3, 0.2),
+    EventType.E2_URGENT:   (0.4, 0.2, 0.4),
+    EventType.E3_CAPACITY: (0.3, 0.4, 0.3),
+    EventType.E4_TIME_RISK: (0.6, 0.2, 0.2),
+}
+
+
+def urgency_score(event, solution, traffic, demands, service_times,
+                  windows_open, windows_close, lambda_1, lambda_2,
+                  t_horizon=720, t_current=360):
+    """Eq.34-35: urgency score for event-triggered dispatch.
+
+    Ψ(e,t) = α·time_factor + β·impact + γ·cost_increase
+    Higher score → more urgent → more likely to trigger dispatch.
+    """
+    etype = event['type']
+    alpha, beta, gamma = EVENT_WEIGHTS.get(etype, (0.4, 0.3, 0.3))
+
+    time_factor = 0.5
+    if etype == EventType.E4_TIME_RISK:
+        slack = event.get('slack_minutes', 60)
+        time_factor = 1.0 - min(slack / 60.0, 1.0)
+    elif etype == EventType.E2_URGENT:
+        tw_open = event.get('tw_open', 0)
+        time_factor = min(tw_open / t_horizon, 1.0)
+
+    impact = 0.5
+    if etype == EventType.E1_TRAFFIC:
+        blocked_tt = event.get('blocked_travel_time', 10)
+        orig_tt = event.get('original_travel_time', 10)
+        impact = min(blocked_tt / max(orig_tt, 1.0) / 5.0, 1.0)
+    elif etype == EventType.E3_CAPACITY:
+        load = event.get('current_load', 120)
+        cap = event.get('capacity', 120)
+        impact = min(load / cap, 1.0)
+
+    cost_increase = 0.5
+    if etype == EventType.E1_TRAFFIC:
+        v = event['vehicle']
+        route = solution.routes[v]
+        _, detail = route.compute_cost(
+            traffic, demands, service_times, windows_open, windows_close,
+            lambda_1, lambda_2)
+        ref_cost = max(detail['travel_cost'], 1.0)
+        cost_increase = min(event.get('blocked_travel_time', 10) * 3 / ref_cost, 1.0)
+
+    return alpha * time_factor + beta * impact + gamma * cost_increase
