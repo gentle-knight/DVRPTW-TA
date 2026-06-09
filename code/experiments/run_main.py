@@ -125,7 +125,8 @@ def main():
 
             row_path = run_dir / f'{alg_key}_seed{seed:02d}.json'
             with open(row_path, 'w') as f:
-                json.dump(m, f, indent=2)
+                json.dump({k: float(v) if isinstance(v, (np.floating, np.integer)) else v
+                           for k, v in m.items()}, f, indent=2)
 
         means = {}
         stds = {}

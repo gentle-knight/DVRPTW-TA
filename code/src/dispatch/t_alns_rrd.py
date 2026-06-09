@@ -140,8 +140,13 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                     best_immediate = float('inf')
                     best_greedy_candidate = None
                     for cand in candidates:
+                        eff_d = demands
+                        eff_wo = windows_open
+                        eff_wc = windows_close
+                        if 'extended_data' in cand:
+                            eff_d, _, eff_wo, eff_wc = cand['extended_data']
                         ic, _ = cand['solution'].compute_cost(
-                            eval_tm, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
+                            eval_tm, eff_d, service_times, eff_wo, eff_wc, lambda_1, lambda_2)
                         if ic < best_immediate:
                             best_immediate = ic
                             best_greedy_candidate = cand
