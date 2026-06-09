@@ -2,22 +2,17 @@
 """
 Ablation study runner: isolates contribution of each Tabu memory component.
 
-Configurations (corresponds to paper Table 11):
-  no_tabu  — ALNS without any Tabu memory
-  move_only — T-ALNS with move tabu only
-  soln_only — T-ALNS with solution tabu only
-  freq_only — T-ALNS with frequency memory only
-  full — complete T-ALNS (all three components)
-
-Output: outputs/processed/ablation_table.csv
+Usage:
+  python experiments/run_ablation.py                          # default: 10 seeds, 600 iters
+  python experiments/run_ablation.py --seeds 5 --iters 300    # quick: 5 seeds, 300 iters
 """
 
-import os, sys, json, csv, time
+import os, sys, json, csv, time, argparse
 from pathlib import Path
 from datetime import datetime
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / 'src'))
 
 from traffic.traffic_manager import TrafficManager
@@ -30,7 +25,6 @@ RAW_DIR = PROJECT_ROOT / 'outputs' / 'raw_runs'
 for d in [PROCESSED_DIR, RAW_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-N_SEEDS = 10
 MAX_ITER = 600
 LAMBDA_1 = 1.0
 LAMBDA_2 = 0.5
@@ -38,7 +32,7 @@ LAMBDA_2 = 0.5
 
 def run_ablation_variant(name, tm, demands, service_times, windows_open, windows_close,
                          enable_move=True, enable_solution=True, enable_frequency=True,
-                         seeds=None):
+                         max_iter=600, seeds=None):
     from core.initialization import build_greedy_init
     from core.destroy import random_removal, worst_removal, relatedness_removal
     from core.repair import greedy_insertion, regret2_insertion, tw_aware_insertion
@@ -47,7 +41,7 @@ def run_ablation_variant(name, tm, demands, service_times, windows_open, windows
     from tabu.frequency import FrequencyMemory
 
     if seeds is None:
-        seeds = range(1, N_SEEDS + 1)
+        seeds = range(1, 11)
 
     rows = []
     DESTROY_OPS = {'random': random_removal, 'worst': worst_removal, 'related': relatedness_removal}
@@ -84,7 +78,7 @@ def run_ablation_variant(name, tm, demands, service_times, windows_open, windows
 
         T_sa = 0.05 * best_cost
 
-        for it in range(1, MAX_ITER + 1):
+        for it in range(1, max_iter + 1):
             iter_rng = np.random.RandomState(np.random.RandomState(seed + it).randint(0, 2**31 - 1))
 
             d_sum = sum(d_weights.values())
@@ -211,9 +205,18 @@ def run_ablation_variant(name, tm, demands, service_times, windows_open, windows
 
 
 def main():
+    parser = argparse.ArgumentParser(description='T-ALNS-RRD Ablation Study Runner')
+    parser.add_argument('--seeds', type=int, default=10, help='Number of random seeds (default: 10)')
+    parser.add_argument('--iters', type=int, default=600, help='Max ALNS iterations (default: 600)')
+    args = parser.parse_args()
+
+    n_seeds = args.seeds
+    max_iter = args.iters
+
     print('T-ALNS-RRD Ablation Study Runner')
     print(f'  Variants: no_tabu, move_only, soln_only, freq_only, full')
-    print(f'  Seeds: {N_SEEDS}')
+    print(f'  Seeds: {n_seeds}')
+    print(f'  Max iterations: {max_iter}')
 
     tm = TrafficManager(theta=1.0, beta=0.5)
     demands, service_times, windows_open, windows_close = load_customer_data()
@@ -226,7 +229,7 @@ def main():
         'full':       (True,  True,  True),
     }
 
-    seeds = list(range(1, N_SEEDS + 1))
+    seeds = list(range(1, n_seeds + 1))
     all_rows = []
 
     for name, (move, soln, freq) in variants.items():
@@ -234,7 +237,7 @@ def main():
         rows = run_ablation_variant(
             name, tm, demands, service_times, windows_open, windows_close,
             enable_move=move, enable_solution=soln, enable_frequency=freq,
-            seeds=seeds)
+            max_iter=max_iter, seeds=seeds)
 
         for m in rows:
             print(f'  seed={m["seed"]:2d}: total={m["total"]:7.1f} OTDR={m["otdr"]:5.1f}% CES={m["ces"]:5.2f}')
@@ -246,7 +249,7 @@ def main():
             means[k] = float(np.mean(vals))
             stds[k] = float(np.std(vals))
 
-        summary = {'variant': name, 'n_seeds': N_SEEDS}
+        summary = {'variant': name, 'n_seeds': n_seeds}
         for k in metrics_header():
             summary[f'{k}_mean'] = means[k]
             summary[f'{k}_std'] = stds[k]

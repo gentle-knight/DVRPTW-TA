@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Main experiment runner: 5 algorithms × 30 seeds → comparison table.
+Main experiment runner: 5 algorithms × N seeds → comparison table.
 
-Runs all baselines and proposed methods, saves raw results per seed,
-aggregates into processed/main_comparison.csv.
-
-Algorithms: Static-VRPTW, TA-VRPTW-Greedy, ALNS-Base, T-ALNS, T-ALNS-RRD
-Metrics: total, travel, lateness, congestion, OTDR, CES, avg_delay, max_delay, ...
+Usage:
+  python experiments/run_main.py                          # default: 30 seeds, 800 iters
+  python experiments/run_main.py --seeds 10 --iters 400   # quick: 10 seeds, 400 iters
+  python experiments/run_main.py --algo ALNS-Base,T-ALNS --seeds 20  # specific algorithms only
 """
 
-import os, sys, time, json, csv
+import os, sys, time, json, csv, argparse
 from pathlib import Path
 from datetime import datetime
 
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / 'src'))
 
 from traffic.traffic_manager import TrafficManager
@@ -32,12 +31,10 @@ PROCESSED_DIR = OUTPUT_DIR / 'processed'
 for d in [RAW_DIR, PROCESSED_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-N_SEEDS = 30
-MAX_ITER = 800
 LAMBDA_1 = 1.0
 LAMBDA_2 = 0.5
 
-ALGORITHMS = {
+ALL_ALGORITHMS = {
     'Static-VRPTW': 'static',
     'TA-VRPTW-Greedy': 'ta_greedy',
     'ALNS-Base': 'alns',
@@ -45,7 +42,7 @@ ALGORITHMS = {
     'T-ALNS-RRD': 't_alns_rrd',
 }
 
-def run_one(alg_name, seed, tm, demands, service_times, windows_open, windows_close):
+def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, windows_close):
     t0 = time.time()
 
     if alg_name == 'Static-VRPTW':
@@ -56,15 +53,15 @@ def run_one(alg_name, seed, tm, demands, service_times, windows_open, windows_cl
         m = compute_metrics(sol, tm, demands, service_times, windows_open, windows_close, LAMBDA_1, LAMBDA_2)
     elif alg_name == 'ALNS-Base':
         _, m, _ = run_alns(tm, demands, service_times, windows_open, windows_close,
-                           max_iter=MAX_ITER, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
+                           max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
                            seed=seed, verbose=False)
     elif alg_name == 'T-ALNS':
         _, m, _, _ = run_t_alns_full(tm, demands, service_times, windows_open, windows_close,
-                                     max_iter=MAX_ITER, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
+                                     max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
                                      seed=seed, verbose=False)
     elif alg_name == 'T-ALNS-RRD':
         _, m, _ = run_t_alns_rrd(tm, demands, service_times, windows_open, windows_close,
-                                 max_iter=MAX_ITER, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
+                                 max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
                                  seed=seed, verbose=False)
     else:
         raise ValueError(f'Unknown algorithm: {alg_name}')
@@ -77,10 +74,24 @@ def run_one(alg_name, seed, tm, demands, service_times, windows_open, windows_cl
 
 
 def main():
+    parser = argparse.ArgumentParser(description='T-ALNS-RRD Main Experiment Runner')
+    parser.add_argument('--seeds', type=int, default=30, help='Number of random seeds (default: 30)')
+    parser.add_argument('--iters', type=int, default=800, help='Max ALNS iterations (default: 800)')
+    parser.add_argument('--algo', type=str, default=None,
+                        help='Comma-separated algorithm names. Default: all 5')
+    args = parser.parse_args()
+
+    n_seeds = args.seeds
+    max_iter = args.iters
+    if args.algo:
+        selected = {k: ALL_ALGORITHMS[k] for k in args.algo.split(',') if k in ALL_ALGORITHMS}
+    else:
+        selected = ALL_ALGORITHMS
+
     print(f'T-ALNS-RRD Main Experiment Runner')
-    print(f'  Algorithms: {list(ALGORITHMS.keys())}')
-    print(f'  Seeds: {N_SEEDS}')
-    print(f'  Max iterations: {MAX_ITER}')
+    print(f'  Algorithms: {list(selected.keys())}')
+    print(f'  Seeds: {n_seeds}')
+    print(f'  Max iterations: {max_iter}')
     print()
 
     tm = TrafficManager(theta=1.0, beta=0.5)
@@ -92,13 +103,13 @@ def main():
 
     all_rows = []
 
-    for alg_display, alg_key in ALGORITHMS.items():
+    for alg_display, alg_key in selected.items():
         print(f'\n{"="*60}')
         print(f'Running {alg_display} ({alg_key})...')
         alg_rows = []
 
-        for seed in range(1, N_SEEDS + 1):
-            m = run_one(alg_display, seed, tm, demands, service_times, windows_open, windows_close)
+        for seed in range(1, n_seeds + 1):
+            m = run_one(alg_display, seed, max_iter, tm, demands, service_times, windows_open, windows_close)
             alg_rows.append(m)
 
             print(f'  seed={seed:2d}: total={m["total"]:7.1f} travel={m["travel"]:7.1f} '
@@ -118,7 +129,7 @@ def main():
 
         summary = {
             'algorithm': alg_display,
-            'n_seeds': N_SEEDS,
+            'n_seeds': n_seeds,
         }
         for k in metrics_header() + ['runtime_sec']:
             summary[f'{k}_mean'] = means[k]
