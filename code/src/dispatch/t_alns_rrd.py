@@ -27,6 +27,31 @@ from utils.evaluation import compute_metrics
 from tabu.frequency import FrequencyMemory
 
 
+class IncidentTraffic:
+    def __init__(self, base_tm, blocked_arc, multiplier=3.0):
+        self._tm = base_tm
+        self._blocked = blocked_arc
+        self._mult = multiplier
+
+    def _is_blocked(self, i, j):
+        return self._blocked is not None and (i, j) == self._blocked
+
+    def travel_time(self, i, j, T):
+        t = self._tm.travel_time(i, j, T)
+        return t * self._mult if self._is_blocked(i, j) else t
+
+    def congestion_cost(self, i, j, T):
+        return self._tm.congestion_cost(i, j, T)
+
+    def adjusted_time(self, i, j, T):
+        t = self._tm.adjusted_time(i, j, T)
+        base = self._tm.travel_time(i, j, T)
+        return t + base * (self._mult - 1) if self._is_blocked(i, j) else t
+
+    def free_flow_time(self, i, j):
+        return self._tm.free_flow_time(i, j)
+
+
 def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                    max_iter=1000, event_iterations=(250, 500, 750),
                    lambda_1=1.0, lambda_2=0.5,
@@ -66,7 +91,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
 
             pre_solution = current.copy()
             pre_cost, pre_detail = pre_solution.compute_cost(
-                traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
+                eval_tm, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
 
             if etype == EventType.E1_TRAFFIC:
                 event = inject_traffic_incident(
@@ -76,12 +101,16 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                     candidates = generate_candidates_traffic(
                         event, current, traffic, demands, service_times,
                         windows_open, windows_close, lambda_1, lambda_2, rng)
+                    eval_tm = IncidentTraffic(traffic, event['arc'])
+                else:
+                    eval_tm = traffic
             elif etype == EventType.E2_URGENT:
                 event = inject_urgent_order(
                     traffic, demands, service_times, windows_open, windows_close, rng)
                 candidates = generate_candidates_urgent(
                     event, current, traffic, demands, service_times,
                     windows_open, windows_close, lambda_1, lambda_2, rng)
+                eval_tm = traffic
             else:
                 event = inject_time_window_risk(
                     current, traffic, demands, service_times,
@@ -92,6 +121,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                         windows_open, windows_close, lambda_1, lambda_2, rng)
                 else:
                     candidates = []
+                eval_tm = traffic
 
             if event and candidates:
                 chosen, result = dispatch_action(
@@ -117,7 +147,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                         freq_memory = FrequencyMemory(n_customers=len(demands)-1, n_vehicles=4)
 
                     post_cost, post_detail = current.compute_cost(
-                        traffic, eff_demands, eff_service_times, eff_windows_open, eff_windows_close, lambda_1, lambda_2)
+                        eval_tm, eff_demands, eff_service_times, eff_windows_open, eff_windows_close, lambda_1, lambda_2)
 
                     delay_reduction = pre_detail['lateness_penalty'] - post_detail['lateness_penalty']
                     cong_reduction = pre_detail['congestion_cost'] - post_detail['congestion_cost']

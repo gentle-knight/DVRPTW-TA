@@ -122,6 +122,8 @@ def generate_candidates_urgent(event, solution, traffic, demands_orig, service_t
     # Candidate 2: delayed insertion (shift TW by 30min)
     windows_close_delayed = windows_close_ext.copy()
     windows_close_delayed[new_id] += 30
+    best_cost_delayed = float('inf')
+    best_sol_delayed = None
     for v in range(len(solution.routes)):
         sol = solution.copy()
         route = sol.routes[v]
@@ -131,13 +133,13 @@ def generate_candidates_urgent(event, solution, traffic, demands_orig, service_t
             trial = Route(trial_nodes)
             trial.departure_time = route.departure_time
             c, _ = trial.compute_cost(traffic, demands_ext, service_times_ext, windows_open_ext, windows_close_delayed, lambda_1, lambda_2)
-            if c < best_cost:
-                best_cost = c
+            if c < best_cost_delayed:
+                best_cost_delayed = c
                 sol.routes[v].nodes = trial_nodes
-                best_sol = sol
-    if best_sol:
-        candidates.append({'name': 'delayed_insertion', 'solution': best_sol, 'cost': best_cost,
-                           'extended_data': (demands_ext, service_times_ext, windows_open_ext, windows_close_ext)})
+                best_sol_delayed = sol
+    if best_sol_delayed:
+        candidates.append({'name': 'delayed_insertion', 'solution': best_sol_delayed, 'cost': best_cost_delayed,
+                           'extended_data': (demands_ext, service_times_ext, windows_open_ext, windows_close_delayed)})
 
     # Candidate 3: subcontract — keep current solution, pay penalty
     candidates.append({'name': 'subcontract', 'solution': solution.copy(), 'cost': None,
