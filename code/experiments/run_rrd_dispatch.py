@@ -14,6 +14,7 @@ Output: outputs/processed/rrd_dispatch_comparison.csv
 """
 
 import sys, json, csv, argparse, time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -29,33 +30,87 @@ PROCESSED_DIR = PROJECT_ROOT / 'outputs' / 'processed'
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def parse_event_iters(raw):
+    if raw is None or raw.strip() == '':
+        return None
+    return tuple(int(x.strip()) for x in raw.split(',') if x.strip())
+
+
+def parse_event_types(raw):
+    if raw is None or raw.strip() == '':
+        return None
+    return tuple(x.strip() for x in raw.split(',') if x.strip())
+
+
+def run_one(seed, mode, instance, iters, tmax, event_iterations, event_sequence):
+    csv_path = PROJECT_ROOT / 'datasets' / 'customers' / (
+        'customers_47.csv' if instance == 'easy' else 'customers_47_medium.csv')
+
+    tm = TrafficManager(theta=1.0, beta=0.5)
+    demands, service_times, windows_open, windows_close = load_customer_data(csv_path=csv_path)
+
+    t0 = time.time()
+    _, _, dlog, _ = run_t_alns_rrd(
+        tm, demands, service_times, windows_open, windows_close,
+        max_iter=iters, seed=seed, verbose=False,
+        dispatch_mode=mode, t_max=tmax,
+        event_iterations=event_iterations or (250, 500, 750, 875),
+        event_sequence=event_sequence)
+    elapsed = time.time() - t0
+    return dlog, elapsed
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--instance', default='medium', choices=['easy', 'medium'])
     parser.add_argument('--seeds', type=int, default=10)
     parser.add_argument('--iters', type=int, default=600)
+    parser.add_argument('--tmax', type=int, default=600)
+    parser.add_argument('--event-iters', type=str, default=None,
+                        help='Comma-separated event iterations. Default: 250,500,750,875. Use 40,80 for quick tests.')
+    parser.add_argument('--event-types', type=str, default=None,
+                        help='Comma-separated event types, e.g. E1_TRAFFIC,E2_URGENT.')
+    parser.add_argument('--parallel', type=int, default=1,
+                        help='Parallel worker processes (default: 1). For i5-12600KF, 4-6 is practical.')
     args = parser.parse_args()
-
-    csv_path = PROJECT_ROOT / 'datasets' / 'customers' / (
-        'customers_47.csv' if args.instance == 'easy' else 'customers_47_medium.csv')
-
-    tm = TrafficManager(theta=1.0, beta=0.5)
-    demands, service_times, windows_open, windows_close = load_customer_data(csv_path=csv_path)
+    event_iterations = parse_event_iters(args.event_iters)
+    event_sequence = parse_event_types(args.event_types)
 
     print(f'RRD Dispatch Comparison')
     print(f'  Instance: {args.instance}  Seeds: {args.seeds}  Iters: {args.iters}')
+    print(f'  Parallel workers: {args.parallel}')
+    if event_iterations:
+        print(f'  Event iterations: {event_iterations}')
+    if event_sequence:
+        print(f'  Event types: {event_sequence}')
 
     all_rows = []
+    jobs = [(seed, mode) for seed in range(1, args.seeds + 1)
+            for mode in ['none', 'greedy', 'rollout']]
+    results = {}
+
+    if args.parallel > 1 and len(jobs) > 1:
+        with ProcessPoolExecutor(max_workers=args.parallel) as executor:
+            futures = {
+                executor.submit(
+                    run_one, seed, mode, args.instance, args.iters, args.tmax,
+                    event_iterations, event_sequence): (seed, mode)
+                for seed, mode in jobs
+            }
+            for future in as_completed(futures):
+                seed, mode = futures[future]
+                results[(seed, mode)] = future.result()
+                print(f'  seed={seed:2d} mode={mode:7s}: done')
+    else:
+        for seed, mode in jobs:
+            results[(seed, mode)] = run_one(
+                seed, mode, args.instance, args.iters, args.tmax,
+                event_iterations, event_sequence)
+            print(f'  seed={seed:2d} mode={mode:7s}: done')
 
     for seed in range(1, args.seeds + 1):
         for mode in ['none', 'greedy', 'rollout']:
-            t0 = time.time()
-            _, _, dlog = run_t_alns_rrd(
-                tm, demands, service_times, windows_open, windows_close,
-                max_iter=args.iters, seed=seed, verbose=False,
-                dispatch_mode=mode)
-            elapsed = time.time() - t0
-
+            dlog, elapsed = results[(seed, mode)]
             for entry in dlog:
                 row = {
                     'seed': seed,

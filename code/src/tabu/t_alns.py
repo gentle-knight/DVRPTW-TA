@@ -21,6 +21,7 @@ from core.solution import Route, N_DEPOT
 from core.initialization import build_greedy_init
 from core.destroy import random_removal, worst_removal, relatedness_removal
 from core.repair import greedy_insertion, regret2_insertion, tw_aware_insertion
+from core.local_search import polish_solution
 from utils.evaluation import compute_metrics
 
 DESTROY_OPS = {'random': random_removal, 'worst': worst_removal, 'related': relatedness_removal}
@@ -149,7 +150,7 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
                 traffic, demands, service_times, windows_open, windows_close,
                 lambda_1=lambda_1, lambda_2=lambda_2)
 
-            is_tabu_move = move_tabu.is_tabu(cand_removed, it)
+            is_tabu_move = move_tabu.is_tabu(cand_removed, it, d_name, r_name)
             is_tabu_sol = sol_tabu.is_tabu(candidate, it)
 
             if is_tabu_sol:
@@ -287,6 +288,12 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
                   f'total={m["total"]:7.1f} OTDR={m["otdr"]:5.1f}% '
                   f'| rej={tabu_reject_count} rev={sol_revisit_count} asp={aspiration_count} {div_tag} | {tag}')
 
+    best, best_cost, best_detail, polish_improvements = polish_solution(
+        best, traffic, demands, service_times, windows_open, windows_close,
+        lambda_1=lambda_1, lambda_2=lambda_2, capacity=120.0, max_passes=20)
+    if history:
+        history[-1] = best_cost
+
     elapsed = time.time() - t0
     final = compute_metrics(best, traffic, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
 
@@ -299,6 +306,7 @@ def run_t_alns_full(traffic, demands, service_times, windows_open, windows_close
         'total_candidates': total_candidates,
         'accepted_worse_count': accepted_worse_count,
         'move_tabu_tenure_final': move_tabu.tenure,
+        'polish_improvements': polish_improvements,
         'elapsed_sec': elapsed,
     }
 

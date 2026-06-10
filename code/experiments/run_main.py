@@ -9,6 +9,7 @@ Usage:
 """
 
 import os, sys, time, json, csv, argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime
 
@@ -42,8 +43,38 @@ ALL_ALGORITHMS = {
     'T-ALNS-RRD': 't_alns_rrd',
 }
 
-def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, windows_close, t_max=600):
+
+def _load_problem(instance):
+    tm = TrafficManager(theta=1.0, beta=0.5)
+    suffix = '' if instance == 'easy' else '_medium'
+    demands, service_times, windows_open, windows_close = load_customer_data(
+        csv_path=PROJECT_ROOT / 'datasets' / 'customers' / f'customers_47{suffix}.csv')
+    return tm, demands, service_times, windows_open, windows_close
+
+
+def _jsonable(value):
+    if isinstance(value, (np.floating, np.integer)):
+        return float(value)
+    return value
+
+
+def _parse_event_iters(raw):
+    if raw is None or raw.strip() == '':
+        return None
+    return tuple(int(x.strip()) for x in raw.split(',') if x.strip())
+
+
+def _parse_event_types(raw):
+    if raw is None or raw.strip() == '':
+        return None
+    return tuple(x.strip() for x in raw.split(',') if x.strip())
+
+
+def run_one(alg_name, seed, max_iter, instance='easy', t_max=600,
+            event_iterations=None, event_sequence=None):
+    tm, demands, service_times, windows_open, windows_close = _load_problem(instance)
     t0 = time.time()
+    history = []
 
     if alg_name == 'Static-VRPTW':
         sol, static_tm = run_static_vrptw(tm, demands, service_times, windows_open, windows_close, seed=seed)
@@ -52,9 +83,11 @@ def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, 
         m['planning_total'] = pm['total']
         m['planning_travel'] = pm['travel']
         m['planning_lateness'] = pm['lateness']
+        history = [m['total']]
     elif alg_name == 'TA-VRPTW-Greedy':
         sol = run_ta_greedy(tm, demands, service_times, windows_open, windows_close, seed=seed)
         m = compute_metrics(sol, tm, demands, service_times, windows_open, windows_close, LAMBDA_1, LAMBDA_2)
+        history = [m['total']]
     elif alg_name == 'ALNS-Base':
         _, m, history = run_alns(tm, demands, service_times, windows_open, windows_close,
                            max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
@@ -66,7 +99,9 @@ def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, 
     elif alg_name == 'T-ALNS-RRD':
         _, m, _, history = run_t_alns_rrd(tm, demands, service_times, windows_open, windows_close,
                                  max_iter=max_iter, lambda_1=LAMBDA_1, lambda_2=LAMBDA_2,
-                                 seed=seed, verbose=False, t_max=t_max)
+                                 seed=seed, verbose=False, t_max=t_max,
+                                 event_iterations=event_iterations or (250, 500, 750, 875),
+                                 event_sequence=event_sequence)
     else:
         raise ValueError(f'Unknown algorithm: {alg_name}')
 
@@ -74,7 +109,7 @@ def run_one(alg_name, seed, max_iter, tm, demands, service_times, windows_open, 
     m['algorithm'] = alg_name
     m['seed'] = seed
     m['runtime_sec'] = elapsed
-    return m
+    return m, history
 
 
 def main():
@@ -86,24 +121,35 @@ def main():
                         help='Comma-separated algorithm names. Default: all 5')
     parser.add_argument('--instance', type=str, default='easy', choices=['easy', 'medium'],
                         help='Instance difficulty (default: easy)')
+    parser.add_argument('--parallel', type=int, default=1,
+                        help='Parallel worker processes per algorithm (default: 1). For i5-12600KF, 4-6 is a practical full-run range.')
+    parser.add_argument('--event-iters', type=str, default=None,
+                        help='Comma-separated event iterations for T-ALNS-RRD. Default: 250,500,750,875. Useful for quick tests, e.g. 40,80.')
+    parser.add_argument('--event-types', type=str, default='E1_TRAFFIC,E4_TIME_RISK,E3_CAPACITY,E1_TRAFFIC',
+                        help='Comma-separated T-ALNS-RRD event types. Main comparison default avoids E2 urgent orders so all algorithms keep the same customer set.')
     args = parser.parse_args()
 
     n_seeds = args.seeds
     max_iter = args.iters
+    event_iterations = _parse_event_iters(args.event_iters)
+    event_sequence = _parse_event_types(args.event_types)
     if args.algo:
         selected = {k: ALL_ALGORITHMS[k] for k in args.algo.split(',') if k in ALL_ALGORITHMS}
     else:
         selected = ALL_ALGORITHMS
+    if not selected:
+        raise ValueError(f'No valid algorithms selected from --algo={args.algo!r}')
 
     print(f'T-ALNS-RRD Main Experiment Runner')
     print(f'  Algorithms: {list(selected.keys())}')
     print(f'  Seeds: {n_seeds}')
     print(f'  Max iterations: {max_iter}')
+    print(f'  Parallel workers per algorithm: {args.parallel}')
+    if event_iterations:
+        print(f'  T-ALNS-RRD event iterations: {event_iterations}')
+    if event_sequence:
+        print(f'  T-ALNS-RRD event types: {event_sequence}')
     print()
-
-    tm = TrafficManager(theta=1.0, beta=0.5)
-    demands, service_times, windows_open, windows_close = load_customer_data(
-        csv_path=PROJECT_ROOT / 'datasets' / 'customers' / f'customers_47{"" if args.instance == "easy" else "_medium"}.csv')
 
     run_id = datetime.now().strftime('run_%Y%m%d_%H%M%S')
     run_dir = RAW_DIR / run_id
@@ -115,9 +161,26 @@ def main():
         print(f'\n{"="*60}')
         print(f'Running {alg_display} ({alg_key})...')
         alg_rows = []
+        seed_results = {}
+
+        if args.parallel > 1 and n_seeds > 1:
+            with ProcessPoolExecutor(max_workers=args.parallel) as executor:
+                futures = {
+                    executor.submit(run_one, alg_display, seed, max_iter, args.instance,
+                                    args.tmax, event_iterations, event_sequence): seed
+                    for seed in range(1, n_seeds + 1)
+                }
+                for future in as_completed(futures):
+                    seed = futures[future]
+                    seed_results[seed] = future.result()
+                    print(f'  seed={seed:2d}: done')
+        else:
+            for seed in range(1, n_seeds + 1):
+                seed_results[seed] = run_one(alg_display, seed, max_iter, args.instance,
+                                             args.tmax, event_iterations, event_sequence)
 
         for seed in range(1, n_seeds + 1):
-            m = run_one(alg_display, seed, max_iter, tm, demands, service_times, windows_open, windows_close, t_max=args.tmax)
+            m, history = seed_results[seed]
             alg_rows.append(m)
 
             print(f'  seed={seed:2d}: total={m["total"]:7.1f} travel={m["travel"]:7.1f} '
@@ -126,8 +189,7 @@ def main():
 
             row_path = run_dir / f'{alg_key}_seed{seed:02d}.json'
             with open(row_path, 'w') as f:
-                json.dump({k: float(v) if isinstance(v, (np.floating, np.integer)) else v
-                           for k, v in m.items()}, f, indent=2)
+                json.dump({k: _jsonable(v) for k, v in m.items()}, f, indent=2)
 
             hist_path = run_dir / f'{alg_key}_seed{seed:02d}_history.json'
             with open(hist_path, 'w') as f:
@@ -170,7 +232,8 @@ def main():
         metallic[row['algorithm']] = {k: row[k] for k in fieldnames}
     metallic_path = PROCESSED_DIR / 'main_comparison.json'
     with open(metallic_path, 'w') as f:
-        json.dump(metallic, f, indent=2)
+        json.dump({alg: {k: _jsonable(v) for k, v in row.items()}
+                   for alg, row in metallic.items()}, f, indent=2)
     print(f'Metadata: {metallic_path}')
 
     print('\n=== Main Comparison Summary ===')

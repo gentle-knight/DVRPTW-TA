@@ -22,14 +22,18 @@ class MoveTabuList:
         self.entries = []
         self.stall_count = 0
 
-    def is_tabu(self, removed_set, current_iter):
+    def is_tabu(self, removed_set, current_iter, d_op=None, r_op=None):
         r_set = set(removed_set)
         n = len(r_set)
         if n == 0:
             return False
 
-        for c_set, _d_op, _r_op, t_iter in self.entries:
+        for c_set, old_d_op, old_r_op, t_iter in self.entries:
             if current_iter - t_iter > self.tenure:
+                continue
+            if d_op is not None and old_d_op != d_op:
+                continue
+            if r_op is not None and old_r_op != r_op:
                 continue
             c_len = len(c_set)
             overlap = len(r_set & c_set)

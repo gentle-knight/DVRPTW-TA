@@ -25,6 +25,7 @@ from .candidates import (
 )
 from .dispatch import dispatch_action
 from core.solution import Solution, Route, N_DEPOT
+from core.local_search import polish_solution
 from utils.evaluation import compute_metrics
 from tabu.aspiration import check_aspiration
 from tabu.diversification import compute_intensity, adjust_probabilities, compute_diversity_scores
@@ -56,12 +57,64 @@ class IncidentTraffic:
         return self._tm.free_flow_time(i, j)
 
 
+EVENT_ALIASES = {
+    'E1': EventType.E1_TRAFFIC,
+    'E1_TRAFFIC': EventType.E1_TRAFFIC,
+    'TRAFFIC': EventType.E1_TRAFFIC,
+    'E2': EventType.E2_URGENT,
+    'E2_URGENT': EventType.E2_URGENT,
+    'URGENT': EventType.E2_URGENT,
+    'E3': EventType.E3_CAPACITY,
+    'E3_CAPACITY': EventType.E3_CAPACITY,
+    'CAPACITY': EventType.E3_CAPACITY,
+    'E4': EventType.E4_TIME_RISK,
+    'E4_TIME_RISK': EventType.E4_TIME_RISK,
+    'TIME_RISK': EventType.E4_TIME_RISK,
+}
+
+
+def _coerce_event_sequence(event_sequence):
+    if event_sequence is None:
+        return (EventType.E1_TRAFFIC, EventType.E2_URGENT,
+                EventType.E4_TIME_RISK, EventType.E3_CAPACITY)
+
+    coerced = []
+    for item in event_sequence:
+        if isinstance(item, EventType):
+            coerced.append(item)
+        else:
+            key = str(item).strip().upper()
+            if key not in EVENT_ALIASES:
+                raise ValueError(f'Unknown event type: {item}')
+            coerced.append(EVENT_ALIASES[key])
+
+    if not coerced:
+        raise ValueError('event_sequence must not be empty')
+    return tuple(coerced)
+
+
+def _candidate_event_cost(candidate, eval_tm, demands, service_times,
+                          windows_open, windows_close, lambda_1, lambda_2):
+    eff_d = demands
+    eff_st = service_times
+    eff_wo = windows_open
+    eff_wc = windows_close
+    if 'extended_data' in candidate:
+        eff_d, eff_st, eff_wo, eff_wc = candidate['extended_data']
+
+    route_cost, detail = candidate['solution'].compute_cost(
+        eval_tm, eff_d, eff_st, eff_wo, eff_wc, lambda_1, lambda_2)
+    total_cost = route_cost + candidate.get('subcontract_penalty', 0.0)
+    return total_cost, route_cost, detail
+
+
 def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                    max_iter=1000, event_iterations=(250, 500, 750, 875),
                    lambda_1=1.0, lambda_2=0.5,
                    cooling_rate=0.99975, reaction_factor=0.1, segment_size=100,
                    max_attempts=10, seed=42, verbose=True,
                    dispatch_mode='rollout',
+                   event_sequence=None,
                    delta_max=0.8, eta=0.6,
                    aspiration_beta=0.3, aspiration_gamma=0.7,
                    t_max=600):
@@ -88,6 +141,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
     repair_names = ['greedy', 'regret2', 'tw_aware']
 
     iter_events = set(event_iterations)
+    event_sequence = _coerce_event_sequence(event_sequence)
     event_idx = 0
     it = 0
 
@@ -95,7 +149,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
         if time.time() - t0 > t_max:
             break
         if it in iter_events:
-            etype = [EventType.E1_TRAFFIC, EventType.E2_URGENT, EventType.E4_TIME_RISK, EventType.E3_CAPACITY][event_idx]
+            etype = event_sequence[event_idx % len(event_sequence)]
 
             if verbose:
                 m_pre = compute_metrics(current, traffic, demands, service_times,
@@ -104,6 +158,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                       f'late={m_pre["lateness"]:.1f} total={m_pre["total"]:.1f} OTDR={m_pre["otdr"]:.1f}%')
 
             pre_solution = current.copy()
+            pre_n_customers = len(demands) - 1
             eval_tm = traffic
             pre_cost, pre_detail = pre_solution.compute_cost(
                 eval_tm, demands, service_times, windows_open, windows_close, lambda_1, lambda_2)
@@ -126,17 +181,6 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                     event, current, traffic, demands, service_times,
                     windows_open, windows_close, lambda_1, lambda_2, rng)
                 eval_tm = traffic
-                # E2 creates a new customer; extend arrays and resize memory immediately
-                # so dispatch evaluation can reference the new customer ID.
-                if event and freq_memory:
-                    new_id = event['new_id']
-                    if new_id >= len(demands):
-                        ext_size = new_id + 1
-                        demands = np.pad(demands, (0, ext_size - len(demands)), constant_values=0)
-                        service_times = np.pad(service_times, (0, ext_size - len(service_times)), constant_values=0)
-                        windows_open = np.pad(windows_open, (0, ext_size - len(windows_open)), constant_values=0)
-                        windows_close = np.pad(windows_close, (0, ext_size - len(windows_close)), constant_values=0)
-                        freq_memory.resize(n_customers=len(demands) - 1)
             elif etype == EventType.E3_CAPACITY:
                 event = inject_capacity_violation(current, demands, capacity=120.0, rng=rng)
                 if event:
@@ -159,34 +203,42 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                 eval_tm = traffic
 
             if event and candidates:
+                chosen = None
+                result = None
+                no_action_cost, no_action_detail = current.compute_cost(
+                    eval_tm, demands, service_times, windows_open, windows_close,
+                    lambda_1, lambda_2)
+                unresolved_penalty = 200.0 if etype == EventType.E2_URGENT else 0.0
+                no_action_total = no_action_cost + unresolved_penalty
+
                 if dispatch_mode == 'none':
                     dispatch_log.append({
                         'iter': it, 'event_type': etype.name, 'action': 'none',
                         'success': True, 'response_time_ms': 0,
-                        'pre_cost': pre_cost, 'post_cost': pre_cost,
-                        'delay_reduction': 0, 'congestion_reduction': 0,
+                        'pre_cost': pre_cost, 'post_cost': no_action_total,
+                        'route_cost': no_action_cost,
+                        'external_penalty': unresolved_penalty,
+                        'delay_reduction': pre_detail['lateness_penalty'] - no_action_detail['lateness_penalty'],
+                        'congestion_reduction': pre_detail['congestion_cost'] - no_action_detail['congestion_cost'],
                         'route_change_ratio': 0, 'candidates_count': 0,
                     })
                     if verbose:
-                        print(f'RRD | ACTION: none (no-dispatch) | cost {pre_cost:.1f}')
+                        print(f'RRD | ACTION: none (no-dispatch) | cost {pre_cost:.1f}→{no_action_total:.1f}')
                 elif dispatch_mode == 'greedy':
                     best_immediate = float('inf')
                     best_greedy_candidate = None
                     for cand in candidates:
-                        eff_d = demands
-                        eff_st = service_times
-                        eff_wo = windows_open
-                        eff_wc = windows_close
-                        if 'extended_data' in cand:
-                            eff_d, eff_st, eff_wo, eff_wc = cand['extended_data']
-                        ic, _ = cand['solution'].compute_cost(
-                            eval_tm, eff_d, eff_st, eff_wo, eff_wc, lambda_1, lambda_2)
+                        eff_d = cand.get('extended_data', (demands,))[0]
+                        if not cand['solution'].is_valid(eff_d, capacity=120.0):
+                            continue
+                        ic, _, _ = _candidate_event_cost(
+                            cand, eval_tm, demands, service_times,
+                            windows_open, windows_close, lambda_1, lambda_2)
                         if ic < best_immediate:
                             best_immediate = ic
                             best_greedy_candidate = cand
                     if best_greedy_candidate:
                         chosen = best_greedy_candidate
-                        current = chosen['solution']
                         result = {'success': True, 'response_time_ms': 0, 'rollout_cost': best_immediate,
                                   'stability_penalty': 0, 'chosen_action': chosen['name']}
                     else:
@@ -205,9 +257,67 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                         horizon_minutes=H_rollout,
                         move_tabu=move_tabu, sol_tabu=sol_tabu,
                         freq_memory=freq_memory, current_iter=it,
-                        best_solution=best)
+                        best_solution=best,
+                        n_samples=N_sim,
+                        noise_scale=0.03)
+
+                    # Operational guardrail: rollout may prefer a stable but
+                    # costlier action on tiny instances. Do not let it underperform
+                    # the immediate greedy dispatch under the realized event state.
+                    best_immediate = float('inf')
+                    best_immediate_candidate = None
+                    for cand in candidates:
+                        eff_d = cand.get('extended_data', (demands,))[0]
+                        if not cand['solution'].is_valid(eff_d, capacity=120.0):
+                            continue
+                        ic, _, _ = _candidate_event_cost(
+                            cand, eval_tm, demands, service_times,
+                            windows_open, windows_close, lambda_1, lambda_2)
+                        if ic < best_immediate:
+                            best_immediate = ic
+                            best_immediate_candidate = cand
+
+                    if chosen and best_immediate_candidate:
+                        chosen_immediate, _, _ = _candidate_event_cost(
+                            chosen, eval_tm, demands, service_times,
+                            windows_open, windows_close, lambda_1, lambda_2)
+                        if best_immediate + 1e-6 < chosen_immediate:
+                            chosen = best_immediate_candidate
+                            result['chosen_action'] = chosen['name']
+                            result['rollout_cost'] = best_immediate
+                            result['guardrail_applied'] = True
 
                 if dispatch_mode != 'none' and chosen and result.get('success'):
+                    chosen_event_total, chosen_route_cost, chosen_detail = _candidate_event_cost(
+                        chosen, eval_tm, demands, service_times,
+                        windows_open, windows_close, lambda_1, lambda_2)
+                    if chosen_event_total > no_action_total + 1e-6:
+                        dispatch_log.append({
+                            'iter': it,
+                            'event_type': etype.name,
+                            'action': 'none_guardrail',
+                            'success': True,
+                            'response_time_ms': result.get('response_time_ms', 0),
+                            'pre_cost': pre_cost,
+                            'post_cost': no_action_total,
+                            'route_cost': no_action_cost,
+                            'external_penalty': unresolved_penalty,
+                            'delay_reduction': pre_detail['lateness_penalty'] - no_action_detail['lateness_penalty'],
+                            'congestion_reduction': pre_detail['congestion_cost'] - no_action_detail['congestion_cost'],
+                            'route_change_ratio': 0,
+                            'candidates_count': len(candidates),
+                            'dispatch_mode': dispatch_mode,
+                            'guardrail_applied': True,
+                            'guarded_action': chosen['name'],
+                        })
+                        if verbose:
+                            print(f'RRD | ACTION: none_guardrail | mode={dispatch_mode} | '
+                                  f'guarded={chosen["name"]} | cost {pre_cost:.1f}→{no_action_total:.1f}')
+                        event_idx += 1
+                        history.append(best_cost)
+                        it += 1
+                        continue
+
                     # Guardrail: verify dispatch didn't produce invalid solution
                     eff_demands = demands
                     eff_service_times = service_times
@@ -238,18 +348,36 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
 
                     post_cost, post_detail = current.compute_cost(
                         eval_tm, eff_demands, eff_service_times, eff_windows_open, eff_windows_close, lambda_1, lambda_2)
+                    post_cost_for_log = post_cost + chosen.get('subcontract_penalty', 0.0)
 
                     delay_reduction = pre_detail['lateness_penalty'] - post_detail['lateness_penalty']
                     cong_reduction = pre_detail['congestion_cost'] - post_detail['congestion_cost']
 
                     route_change = 0.0
-                    for r_idx in range(4):
+                    route_count = len(current.routes)
+                    for r_idx in range(route_count):
                         pre_set = set(pre_solution.routes[r_idx].customer_nodes())
                         post_set = set(current.routes[r_idx].customer_nodes())
                         union = len(pre_set | post_set)
                         if union > 0:
                             route_change += 1.0 - len(pre_set & post_set) / union
-                    route_change /= 4
+                    route_change /= max(1, route_count)
+
+                    # If the active customer universe changed (E2 insertion), the
+                    # previous global best is no longer comparable. Re-anchor the
+                    # search on the dispatched solution so final metrics are based
+                    # on a solution serving the active customer set.
+                    current_cost, current_detail = current.compute_cost(
+                        traffic, demands, service_times, windows_open, windows_close,
+                        lambda_1, lambda_2)
+                    if len(demands) - 1 != pre_n_customers:
+                        best = current.copy()
+                        best_cost = current_cost
+                        best_detail = current_detail
+                    elif not best.is_valid(demands, capacity=120.0, n_customers=len(demands) - 1):
+                        best = current.copy()
+                        best_cost = current_cost
+                        best_detail = current_detail
 
                     log_entry = {
                         'iter': it,
@@ -258,7 +386,9 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                         'success': True,
                         'response_time_ms': result.get('response_time_ms', 0),
                         'pre_cost': pre_cost,
-                        'post_cost': post_cost,
+                        'post_cost': post_cost_for_log,
+                        'route_cost': post_cost,
+                        'external_penalty': chosen.get('subcontract_penalty', 0.0),
                         'delay_reduction': delay_reduction,
                         'congestion_reduction': cong_reduction,
                         'route_change_ratio': route_change,
@@ -269,7 +399,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
 
                     if verbose:
                         print(f'RRD | ACTION: {chosen["name"]} | mode={dispatch_mode} | '
-                              f'cost {pre_cost:.1f}→{post_cost:.1f} | '
+                              f'cost {pre_cost:.1f}→{post_cost_for_log:.1f} | '
                               f'delay_red={delay_reduction:.1f} cong_red={cong_reduction:.2f} '
                               f'route_chg={route_change:.3f} | {len(candidates)} candidates')
 
@@ -399,7 +529,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
                     windows_open, windows_close, lambda_1=lambda_1, lambda_2=lambda_2,
                     capacity=120.0, rng=iter_rng)
 
-                is_tabu_move = move_tabu.is_tabu(cand_removed, it)
+                is_tabu_move = move_tabu.is_tabu(cand_removed, it, d_name, r_name)
                 is_tabu_sol = sol_tabu.is_tabu(candidate, it)
 
                 if is_tabu_move or is_tabu_sol:
@@ -530,6 +660,12 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
 
         it += 1
 
+    best, best_cost, best_detail, polish_improvements = polish_solution(
+        best, traffic, demands, service_times, windows_open, windows_close,
+        lambda_1=lambda_1, lambda_2=lambda_2, capacity=120.0, max_passes=20)
+    if history:
+        history[-1] = best_cost
+
     elapsed = time.time() - t0
     final = compute_metrics(best, traffic, demands, service_times,
                             windows_open, windows_close, lambda_1, lambda_2)
@@ -537,6 +673,7 @@ def run_t_alns_rrd(traffic, demands, service_times, windows_open, windows_close,
     if verbose:
         print(f'\nT-ALNS-RRD done | {max_iter} iters {elapsed:.1f}s')
         print(f'  travel={final["travel"]:.1f} late={final["lateness"]:.1f} cong={final["congestion"]:.2f} total={final["total"]:.1f} OTDR={final["otdr"]:.1f}%')
+        print(f'  polish improvements={polish_improvements}')
         print(f'\nDispatch stats:')
         for log in dispatch_log:
             print(f'  iter={log["iter"]} {log["event_type"]}: {log["action"]} '

@@ -13,7 +13,8 @@ from core.solution import N_DEPOT
 
 def _single_rollout(solution, traffic, demands, service_times,
                     windows_open, windows_close, lambda_1, lambda_2,
-                    horizon_minutes=60, blocked_arc=None, noise_scale=0.1):
+                    horizon_minutes=60, blocked_arc=None, noise_scale=0.1,
+                    rng=None):
     """Single trajectory rollout with traffic perturbation (Eq.10 via beta*eta)."""
     travel_total = 0.0
     congestion_total = 0.0
@@ -32,7 +33,8 @@ def _single_rollout(solution, traffic, demands, service_times,
                     tt *= 3.0
                 # inject noise: t' = t + beta * eta * epsilon  (Eq.10)
                 eta = traffic.reliability_margin(prev, nid, T)
-                tt = max(0.1, tt + np.random.normal(0, noise_scale * eta))
+                noise = rng.normal(0, noise_scale * eta) if rng is not None else np.random.normal(0, noise_scale * eta)
+                tt = max(0.1, tt + noise)
                 travel_total += tt
                 congestion_total += traffic.congestion_cost(prev, nid, T)
                 T += tt
@@ -45,7 +47,8 @@ def _single_rollout(solution, traffic, demands, service_times,
                 tt *= 3.0
 
             eta = traffic.reliability_margin(prev, nid, T)
-            tt = max(0.1, tt + np.random.normal(0, noise_scale * eta))
+            noise = rng.normal(0, noise_scale * eta) if rng is not None else np.random.normal(0, noise_scale * eta)
+            tt = max(0.1, tt + noise)
 
             travel_total += tt
             congestion_total += cc
@@ -66,19 +69,21 @@ def _single_rollout(solution, traffic, demands, service_times,
 def rollout_cost(solution, traffic, demands, service_times,
                  windows_open, windows_close, lambda_1, lambda_2,
                  horizon_minutes=60, blocked_arc=None,
-                 n_samples=1, noise_scale=0.0):
+                 n_samples=1, noise_scale=0.0, random_seed=None):
     """Rollout cost evaluation (Sect 3.3.3, Eq.36).
 
     With n_samples=1, noise_scale=0.0 (default): deterministic single trajectory.
     With n_samples>1, noise_scale>0: Monte Carlo with Eq.10 traffic perturbation.
     Returns (mean_cost, std_cost).
     """
+    rng = np.random.RandomState(random_seed) if random_seed is not None else None
+
     if n_samples <= 1 or noise_scale <= 0.0:
         c = _single_rollout(
             solution, traffic, demands, service_times,
             windows_open, windows_close, lambda_1, lambda_2,
             horizon_minutes=horizon_minutes, blocked_arc=blocked_arc,
-            noise_scale=0.0,
+            noise_scale=0.0, rng=rng,
         )
         return c, 0.0
 
@@ -88,7 +93,7 @@ def rollout_cost(solution, traffic, demands, service_times,
             solution, traffic, demands, service_times,
             windows_open, windows_close, lambda_1, lambda_2,
             horizon_minutes=horizon_minutes, blocked_arc=blocked_arc,
-            noise_scale=noise_scale,
+            noise_scale=noise_scale, rng=rng,
         )
         costs.append(c)
     return float(np.mean(costs)), float(np.std(costs))
@@ -146,7 +151,8 @@ def evaluate_candidate(candidate, original_solution, traffic, demands, service_t
                        freq_memory=None, omega_1=0.4, omega_2=0.3, omega_3=0.3,
                        n_samples=1, noise_scale=0.0,
                        extended_data=None,
-                       best_solution=None):
+                       best_solution=None,
+                       random_seed=None):
     """Evaluate candidate with composite score (Eq.40).
 
     score = omega_1 * cost + omega_2 * stability + omega_3 * recovery
@@ -162,7 +168,10 @@ def evaluate_candidate(candidate, original_solution, traffic, demands, service_t
         eff_d, eff_st, eff_wo, eff_wc = extended_data
 
     if candidate['name'] == 'subcontract':
-        rc = candidate.get('subcontract_penalty', 50.0)
+        base_cost, _ = original_solution.compute_cost(
+            traffic, demands, service_times, windows_open, windows_close,
+            lambda_1, lambda_2)
+        rc = base_cost + candidate.get('subcontract_penalty', 50.0)
         mc_std = 0.0
     elif n_samples <= 1 and noise_scale <= 0.0:
         rc, _ = candidate['solution'].compute_cost(
@@ -174,6 +183,7 @@ def evaluate_candidate(candidate, original_solution, traffic, demands, service_t
             eff_wo, eff_wc, lambda_1, lambda_2,
             horizon_minutes=horizon_minutes, blocked_arc=blocked_arc,
             n_samples=n_samples, noise_scale=noise_scale,
+            random_seed=random_seed,
         )
 
     sp = stability_penalty(candidate['solution'], original_solution)

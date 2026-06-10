@@ -30,7 +30,7 @@ class FrequencyMemory:
             for pos, cid in enumerate(customers):
                 weight = 1.0
                 if congestion_weights is not None and v < len(congestion_weights):
-                    weight += congestion_weights[v]
+                    weight += congestion_weights[v] / max(1, len(customers))
 
                 self.F_cv[cid, v] += weight
                 self.F_tp[cid, pos] += 1.0
@@ -48,12 +48,16 @@ class FrequencyMemory:
         return float(np.std(self.F_cv))
 
     def least_frequent_assignment(self, customer_id):
+        if customer_id > self.n_customers:
+            return 0.0
         return float(np.min(self.F_cv[customer_id]))
 
     def mean_frequency(self):
         return float(np.mean(self.F_cv))
 
     def diversification_score(self, customer_id, vehicle_id):
+        if customer_id > self.n_customers or vehicle_id >= self.n_vehicles:
+            return 1.0
         total = self.F_cv[customer_id].sum()
         if total < 1e-6:
             return 0.0

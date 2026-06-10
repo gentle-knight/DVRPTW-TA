@@ -15,7 +15,7 @@ def dispatch_action(event, candidates, original_solution, traffic, demands,
                     service_times, windows_open, windows_close,
                     lambda_1, lambda_2, horizon_minutes=60,
                     move_tabu=None, sol_tabu=None, freq_memory=None, current_iter=0,
-                    best_solution=None):
+                    best_solution=None, n_samples=1, noise_scale=0.0):
     t_start = time.time()
 
     best_score = float('inf')
@@ -23,8 +23,12 @@ def dispatch_action(event, candidates, original_solution, traffic, demands,
     best_details = None
 
     for idx, candidate in enumerate(candidates):
+        eff_demands = demands
+        if 'extended_data' in candidate:
+            eff_demands = candidate['extended_data'][0]
+
         # Validate candidate against capacity and unique-service constraints
-        if not candidate['solution'].is_valid(demands, capacity=120.0):
+        if not candidate['solution'].is_valid(eff_demands, capacity=120.0):
             continue
 
         blocked_arc = event.get('arc') if event['type'].name == 'E1_TRAFFIC' else None
@@ -42,6 +46,9 @@ def dispatch_action(event, candidates, original_solution, traffic, demands,
             freq_memory=freq_memory,
             extended_data=candidate.get('extended_data'),
             best_solution=best_solution,
+            n_samples=n_samples,
+            noise_scale=noise_scale,
+            random_seed=current_iter * 1009 + idx,
         )
 
         if score < best_score:
